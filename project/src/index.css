@@ -1,0 +1,103 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-cockpit-950: var(--cockpit-950);
+  --color-cockpit-900: var(--cockpit-900);
+  --color-cockpit-850: var(--cockpit-850);
+  --color-cockpit-800: var(--cockpit-800);
+  --color-cockpit-700: var(--cockpit-700);
+  --color-cockpit-600: var(--cockpit-600);
+  --color-cockpit-500: var(--cockpit-500);
+  --color-cockpit-400: var(--cockpit-400);
+  --color-cockpit-300: var(--cockpit-300);
+  --color-cockpit-200: var(--cockpit-200);
+  --color-cockpit-100: var(--cockpit-100);
+
+  --color-fuel-raw: #e85d2f;
+  --color-fuel-filter: #079669;
+  --color-speed: #2563eb;
+  --color-signal-safe: #16a34a;
+  --color-signal-warn: #dc2626;
+
+  --font-display: "Barlow", "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+:root {
+  --cockpit-950: #f4f7fa;
+  --cockpit-900: #ffffff;
+  --cockpit-850: #ffffff;
+  --cockpit-800: #eef2f6;
+  --cockpit-700: #dce3eb;
+  --cockpit-600: #c7d0db;
+  --cockpit-500: #9aa8b8;
+  --cockpit-400: #536274;
+  --cockpit-300: #3c4b5e;
+  --cockpit-200: #243244;
+  --cockpit-100: #101c2a;
+  --chart-grid: rgba(94, 112, 132, 0.22);
+  --chart-label: rgba(60, 75, 94, 0.8);
+  --chart-spike: rgba(220, 38, 38, 0.1);
+  --chart-speed-grid: rgba(37, 99, 235, 0.12);
+}
+
+.dark {
+  --cockpit-950: #07090d;
+  --cockpit-900: #0c1017;
+  --cockpit-850: #11161f;
+  --cockpit-800: #161c27;
+  --cockpit-700: #1f2734;
+  --cockpit-600: #2a3344;
+  --cockpit-500: #3a4458;
+  --cockpit-400: #6b7589;
+  --cockpit-300: #9aa4b8;
+  --cockpit-200: #c8cfdd;
+  --cockpit-100: #e6eaf2;
+  --chart-grid: rgba(58, 68, 88, 0.45);
+  --chart-label: rgba(154, 164, 184, 0.7);
+  --chart-spike: rgba(239, 68, 68, 0.1);
+  --chart-speed-grid: rgba(37, 99, 235, 0.16);
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--cockpit-950);
+  color: var(--cockpit-100);
+  font-family: var(--font-display);
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes alertflash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.animate-alertflash {
+  animation: alertflash 0.45s ease-in-out infinite;
+}
+
+@keyframes pulseglow {
+  0%, 100% { box-shadow: 0 0 8px rgba(34,197,94,0.4); }
+  50% { box-shadow: 0 0 18px rgba(34,197,94,0.7); }
+}
+
+.animate-pulseglow {
+  animation: pulseglow 2.4s ease-in-out infinite;
+}
+
+@keyframes redglow {
+  0%, 100% { box-shadow: 0 0 10px rgba(239,68,68,0.5); }
+  50% { box-shadow: 0 0 24px rgba(239,68,68,0.9); }
+}
+
+.animate-redglow {
+  animation: redglow 0.45s ease-in-out infinite;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--cockpit-900); }
+::-webkit-scrollbar-thumb { background: var(--cockpit-600); border-radius: 4px; }

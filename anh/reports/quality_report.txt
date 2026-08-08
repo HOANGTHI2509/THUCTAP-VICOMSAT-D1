@@ -1,0 +1,467 @@
+================ BÁO CÁO KIỂM TRA CHẤT LƯỢNG DỮ LIỆU TỪNG XE ================
+
+Đang đọc file CarFuelHistory.xlsx...
+Danh sách sheet (VehicleID): ['Car 1', 'Car 2', 'Car 3', 'Car 4', 'Car 5']
+
+======================================================================
+
+################################################################
+                     PHÂN TÍCH XE: Car 1 
+################################################################
+
+=== BƯỚC 2: Kiểm tra cấu trúc chung ===
+Số dòng: 69474
+Các cột hiện có: ['FuelTime', 'FuelLevel', 'Lat', 'Lng', 'Address', 'Speed', 'VehicleID']
+Cột bị thiếu: Không thiếu cột nào
+
+
+=== BƯỚC 3 & 6: Kiểm tra FuelTime ===
+Số dòng thời gian trống hoặc không đọc được: 0
+Số dòng có timestamp trùng: 0
+Số thời điểm có nhiều FuelLevel khác nhau (xung đột): 0
+
+
+=== BƯỚC 4 & 5: Chuẩn hóa cột số và sắp xếp ===
+Đã sắp xếp dữ liệu theo thời gian.
+
+=== BƯỚC 7 & 8: TimeGap và Tần suất gửi ===
+Khoảng trung vị: 5.0 phút
+Các TimeGap phổ biến:
+TimeGapMinutes
+5.000000    69045
+4.000000       58
+6.500000       36
+3.000000       35
+6.483333       20
+Name: count, dtype: int64
+Số khoảng mất kết nối > 10 phút: 54
+Số khoảng mất kết nối > 30 phút: 13
+Số khoảng mất kết nối > 60 phút: 10
+Số khoảng mất kết nối > 1440 phút: 1
+
+
+=== BƯỚC 9 & 10: Kiểm tra FuelLevel ===
+Số FuelLevel bị thiếu: 0
+Số FuelLevel âm: 0
+Số bản ghi FuelLevel = 0: 2
+Thống kê FuelLevel:
+count    69474.000000
+mean       173.218853
+std         55.408228
+min          0.000000
+25%        132.300000
+50%        167.200000
+75%        212.200000
+max        371.800000
+Name: FuelLevel, dtype: float64
+
+Biến động Fuel lớn nhất (Top 5):
+                 FuelTime  PreviousFuel  FuelLevel  DeltaFuel  TimeGapMinutes
+29550 2026-03-03 13:36:37          89.0      290.5      201.5            46.5
+12683 2026-01-03 12:50:44          95.6      295.2      199.6             5.0
+1     2025-11-19 23:00:59           0.0      191.4      191.4             0.5
+2693  2025-11-29 08:00:13          75.7      265.2      189.5             5.0
+39665 2026-04-09 14:00:44         107.1      295.6      188.5             5.0
+
+
+=== BƯỚC 11 & 12: Kiểm tra Lat/Lng và tính quãng đường ===
+Số Lat ngoài phạm vi: 0
+Số Lng ngoài phạm vi: 0
+Số bản ghi tọa độ 0,0: 0
+
+
+=== BƯỚC 13 & 14: Kiểm tra Speed ===
+Speed bị thiếu: 0
+Số Speed âm: 0
+Thống kê Speed:
+count    69474.000000
+mean         2.876256
+std          9.845872
+min          0.000000
+25%          0.000000
+50%          0.000000
+75%          0.000000
+max         70.000000
+Name: Speed, dtype: float64
+Tỷ lệ Speed = 0 (%): 90.67%
+Số điểm Speed = 0 nhưng di chuyển > 100m: 2299
+Số điểm Speed > 5 nhưng GPS di chuyển < 5m: 0
+
+
+=== BƯỚC 15: Chuẩn hóa Address ===
+Số Address bị thiếu: 0
+
+
+=== BƯỚC 17: Gắn cờ lỗi và lưu file ===
+-> Đã hoàn thành xe Car 1 và lưu kết quả vào file CarFuelHistory_Car1_Flags.csv
+
+======================================================================
+
+################################################################
+                     PHÂN TÍCH XE: Car 2 
+################################################################
+
+=== BƯỚC 2: Kiểm tra cấu trúc chung ===
+Số dòng: 63331
+Các cột hiện có: ['FuelTime', 'FuelLevel', 'Lat', 'Lng', 'Address', 'Speed', 'VehicleID']
+Cột bị thiếu: Không thiếu cột nào
+
+
+=== BƯỚC 3 & 6: Kiểm tra FuelTime ===
+Số dòng thời gian trống hoặc không đọc được: 0
+Số dòng có timestamp trùng: 0
+Số thời điểm có nhiều FuelLevel khác nhau (xung đột): 0
+
+
+=== BƯỚC 4 & 5: Chuẩn hóa cột số và sắp xếp ===
+Đã sắp xếp dữ liệu theo thời gian.
+
+=== BƯỚC 7 & 8: TimeGap và Tần suất gửi ===
+Khoảng trung vị: 5.0 phút
+Các TimeGap phổ biến:
+TimeGapMinutes
+5.000000    61979
+1.666667       26
+2.166667       26
+1.500000       23
+2.666667       22
+Name: count, dtype: int64
+Số khoảng mất kết nối > 10 phút: 365
+Số khoảng mất kết nối > 30 phút: 122
+Số khoảng mất kết nối > 60 phút: 65
+Số khoảng mất kết nối > 1440 phút: 5
+
+
+=== BƯỚC 9 & 10: Kiểm tra FuelLevel ===
+Số FuelLevel bị thiếu: 0
+Số FuelLevel âm: 0
+Số bản ghi FuelLevel = 0: 0
+Thống kê FuelLevel:
+count    63331.000000
+mean       106.216330
+std         43.670855
+min          1.800000
+25%         73.000000
+50%        105.300000
+75%        141.600000
+max        198.900000
+Name: FuelLevel, dtype: float64
+
+Biến động Fuel lớn nhất (Top 5):
+                 FuelTime  PreviousFuel  FuelLevel  DeltaFuel  TimeGapMinutes
+36495 2026-04-16 15:06:01          12.7      191.6      178.9       15.950000
+42776 2026-05-09 08:45:08          33.3      189.5      156.2       15.000000
+47030 2026-05-24 09:21:28          49.2      191.1      141.9       15.866667
+5492  2025-12-09 11:58:20          44.3      184.2      139.9      217.016667
+45899 2026-05-20 08:33:04          59.5      190.0      130.5       17.966667
+
+
+=== BƯỚC 11 & 12: Kiểm tra Lat/Lng và tính quãng đường ===
+Số Lat ngoài phạm vi: 0
+Số Lng ngoài phạm vi: 0
+Số bản ghi tọa độ 0,0: 0
+
+
+=== BƯỚC 13 & 14: Kiểm tra Speed ===
+Speed bị thiếu: 0
+Số Speed âm: 0
+Thống kê Speed:
+count    63331.000000
+mean         3.548720
+std         10.730324
+min          0.000000
+25%          0.000000
+50%          0.000000
+75%          0.000000
+max        149.000000
+Name: Speed, dtype: float64
+Tỷ lệ Speed = 0 (%): 88.28%
+Số điểm Speed = 0 nhưng di chuyển > 100m: 3271
+Số điểm Speed > 5 nhưng GPS di chuyển < 5m: 0
+
+
+=== BƯỚC 15: Chuẩn hóa Address ===
+Số Address bị thiếu: 0
+
+
+=== BƯỚC 17: Gắn cờ lỗi và lưu file ===
+-> Đã hoàn thành xe Car 2 và lưu kết quả vào file CarFuelHistory_Car2_Flags.csv
+
+======================================================================
+
+################################################################
+                     PHÂN TÍCH XE: Car 3 
+################################################################
+
+=== BƯỚC 2: Kiểm tra cấu trúc chung ===
+Số dòng: 69541
+Các cột hiện có: ['FuelTime', 'FuelLevel', 'Lat', 'Lng', 'Address', 'Speed', 'VehicleID']
+Cột bị thiếu: Không thiếu cột nào
+
+
+=== BƯỚC 3 & 6: Kiểm tra FuelTime ===
+Số dòng thời gian trống hoặc không đọc được: 0
+Số dòng có timestamp trùng: 0
+Số thời điểm có nhiều FuelLevel khác nhau (xung đột): 0
+
+
+=== BƯỚC 4 & 5: Chuẩn hóa cột số và sắp xếp ===
+Đã sắp xếp dữ liệu theo thời gian.
+
+=== BƯỚC 7 & 8: TimeGap và Tần suất gửi ===
+Khoảng trung vị: 5.0 phút
+Các TimeGap phổ biến:
+TimeGapMinutes
+5.000000    69235
+3.000000       40
+4.000000       35
+6.483333       17
+6.516667       14
+Name: count, dtype: int64
+Số khoảng mất kết nối > 10 phút: 27
+Số khoảng mất kết nối > 30 phút: 10
+Số khoảng mất kết nối > 60 phút: 8
+Số khoảng mất kết nối > 1440 phút: 1
+
+
+=== BƯỚC 9 & 10: Kiểm tra FuelLevel ===
+Số FuelLevel bị thiếu: 0
+Số FuelLevel âm: 0
+Số bản ghi FuelLevel = 0: 39
+Thống kê FuelLevel:
+count    69541.000000
+mean       207.673150
+std         60.787345
+min          0.000000
+25%        157.100000
+50%        211.500000
+75%        254.800000
+max        359.800000
+Name: FuelLevel, dtype: float64
+
+Biến động Fuel lớn nhất (Top 5):
+                 FuelTime  PreviousFuel  FuelLevel  DeltaFuel  TimeGapMinutes
+1     2025-11-19 23:00:42           0.0      278.8      278.8        0.500000
+67259 2026-07-14 12:10:43         277.3       20.2     -257.1        5.000000
+61214 2026-06-23 12:25:09         287.7       77.1     -210.6        5.000000
+58605 2026-06-14 11:00:56         214.7        6.6     -208.1       10.583333
+64101 2026-07-03 13:00:41         218.3       13.5     -204.8        5.000000
+
+
+=== BƯỚC 11 & 12: Kiểm tra Lat/Lng và tính quãng đường ===
+Số Lat ngoài phạm vi: 0
+Số Lng ngoài phạm vi: 0
+Số bản ghi tọa độ 0,0: 0
+
+
+=== BƯỚC 13 & 14: Kiểm tra Speed ===
+Speed bị thiếu: 0
+Số Speed âm: 0
+Thống kê Speed:
+count    69541.000000
+mean         2.324255
+std          8.352585
+min          0.000000
+25%          0.000000
+50%          0.000000
+75%          0.000000
+max         61.000000
+Name: Speed, dtype: float64
+Tỷ lệ Speed = 0 (%): 91.75%
+Số điểm Speed = 0 nhưng di chuyển > 100m: 1776
+Số điểm Speed > 5 nhưng GPS di chuyển < 5m: 1
+
+
+=== BƯỚC 15: Chuẩn hóa Address ===
+Số Address bị thiếu: 0
+
+
+=== BƯỚC 17: Gắn cờ lỗi và lưu file ===
+-> Đã hoàn thành xe Car 3 và lưu kết quả vào file CarFuelHistory_Car3_Flags.csv
+
+======================================================================
+
+################################################################
+                     PHÂN TÍCH XE: Car 4 
+################################################################
+
+=== BƯỚC 2: Kiểm tra cấu trúc chung ===
+Số dòng: 69476
+Các cột hiện có: ['FuelTime', 'FuelLevel', 'Lat', 'Lng', 'Address', 'Speed', 'VehicleID']
+Cột bị thiếu: Không thiếu cột nào
+
+
+=== BƯỚC 3 & 6: Kiểm tra FuelTime ===
+Số dòng thời gian trống hoặc không đọc được: 0
+Số dòng có timestamp trùng: 0
+Số thời điểm có nhiều FuelLevel khác nhau (xung đột): 0
+
+
+=== BƯỚC 4 & 5: Chuẩn hóa cột số và sắp xếp ===
+Đã sắp xếp dữ liệu theo thời gian.
+
+=== BƯỚC 7 & 8: TimeGap và Tần suất gửi ===
+Khoảng trung vị: 5.0 phút
+Các TimeGap phổ biến:
+TimeGapMinutes
+5.000000    69047
+4.000000       58
+6.500000       36
+3.000000       35
+6.483333       20
+Name: count, dtype: int64
+Số khoảng mất kết nối > 10 phút: 54
+Số khoảng mất kết nối > 30 phút: 13
+Số khoảng mất kết nối > 60 phút: 10
+Số khoảng mất kết nối > 1440 phút: 1
+
+
+=== BƯỚC 9 & 10: Kiểm tra FuelLevel ===
+Số FuelLevel bị thiếu: 0
+Số FuelLevel âm: 0
+Số bản ghi FuelLevel = 0: 2
+Thống kê FuelLevel:
+count    69476.000000
+mean       173.218156
+std         55.407583
+min          0.000000
+25%        132.300000
+50%        167.200000
+75%        212.200000
+max        371.800000
+Name: FuelLevel, dtype: float64
+
+Biến động Fuel lớn nhất (Top 5):
+                 FuelTime  PreviousFuel  FuelLevel  DeltaFuel  TimeGapMinutes
+29550 2026-03-03 13:36:37          89.0      290.5      201.5            46.5
+12683 2026-01-03 12:50:44          95.6      295.2      199.6             5.0
+1     2025-11-19 23:00:59           0.0      191.4      191.4             0.5
+2693  2025-11-29 08:00:13          75.7      265.2      189.5             5.0
+39665 2026-04-09 14:00:44         107.1      295.6      188.5             5.0
+
+
+=== BƯỚC 11 & 12: Kiểm tra Lat/Lng và tính quãng đường ===
+Số Lat ngoài phạm vi: 0
+Số Lng ngoài phạm vi: 0
+Số bản ghi tọa độ 0,0: 0
+
+
+=== BƯỚC 13 & 14: Kiểm tra Speed ===
+Speed bị thiếu: 0
+Số Speed âm: 0
+Thống kê Speed:
+count    69476.000000
+mean         2.876173
+std          9.845742
+min          0.000000
+25%          0.000000
+50%          0.000000
+75%          0.000000
+max         70.000000
+Name: Speed, dtype: float64
+Tỷ lệ Speed = 0 (%): 90.67%
+Số điểm Speed = 0 nhưng di chuyển > 100m: 2300
+Số điểm Speed > 5 nhưng GPS di chuyển < 5m: 0
+
+
+=== BƯỚC 15: Chuẩn hóa Address ===
+Số Address bị thiếu: 0
+
+
+=== BƯỚC 17: Gắn cờ lỗi và lưu file ===
+-> Đã hoàn thành xe Car 4 và lưu kết quả vào file CarFuelHistory_Car4_Flags.csv
+
+======================================================================
+
+################################################################
+                     PHÂN TÍCH XE: Car 5 
+################################################################
+
+=== BƯỚC 2: Kiểm tra cấu trúc chung ===
+Số dòng: 13861
+Các cột hiện có: ['FuelTime', 'FuelLevel', 'Lat', 'Lng', 'Address', 'Speed', 'VehicleID']
+Cột bị thiếu: Không thiếu cột nào
+
+
+=== BƯỚC 3 & 6: Kiểm tra FuelTime ===
+Số dòng thời gian trống hoặc không đọc được: 0
+Số dòng có timestamp trùng: 0
+Số thời điểm có nhiều FuelLevel khác nhau (xung đột): 0
+
+
+=== BƯỚC 4 & 5: Chuẩn hóa cột số và sắp xếp ===
+Đã sắp xếp dữ liệu theo thời gian.
+
+=== BƯỚC 7 & 8: TimeGap và Tần suất gửi ===
+Khoảng trung vị: 5.0 phút
+Các TimeGap phổ biến:
+TimeGapMinutes
+5.000000    13074
+6.266667       44
+3.733333       21
+4.366667       17
+0.166667        9
+Name: count, dtype: int64
+Số khoảng mất kết nối > 10 phút: 352
+Số khoảng mất kết nối > 30 phút: 305
+Số khoảng mất kết nối > 60 phút: 264
+Số khoảng mất kết nối > 1440 phút: 51
+
+
+=== BƯỚC 9 & 10: Kiểm tra FuelLevel ===
+Số FuelLevel bị thiếu: 0
+Số FuelLevel âm: 0
+Số bản ghi FuelLevel = 0: 0
+Thống kê FuelLevel:
+count    13861.000000
+mean       322.034081
+std        127.782080
+min         72.800000
+25%        224.400000
+50%        287.600000
+75%        424.900000
+max        600.000000
+Name: FuelLevel, dtype: float64
+
+Biến động Fuel lớn nhất (Top 5):
+                FuelTime  PreviousFuel  FuelLevel  DeltaFuel  TimeGapMinutes
+2706 2025-12-20 13:55:23         146.8      589.8      443.0      165.366667
+1836 2025-12-08 04:23:58         155.4      593.3      437.9      768.916667
+5441 2026-02-05 15:45:08         168.7      596.0      427.3        3.166667
+7457 2026-03-05 15:08:38         182.3      594.2      411.9      347.933333
+6714 2026-02-26 18:14:54         188.7      594.6      405.9       49.366667
+
+
+=== BƯỚC 11 & 12: Kiểm tra Lat/Lng và tính quãng đường ===
+Số Lat ngoài phạm vi: 0
+Số Lng ngoài phạm vi: 0
+Số bản ghi tọa độ 0,0: 27
+
+
+=== BƯỚC 13 & 14: Kiểm tra Speed ===
+Speed bị thiếu: 0
+Số Speed âm: 0
+Thống kê Speed:
+count    13861.000000
+mean         7.719645
+std         15.656279
+min          0.000000
+25%          0.000000
+50%          0.000000
+75%          0.000000
+max         71.000000
+Name: Speed, dtype: float64
+Tỷ lệ Speed = 0 (%): 77.41%
+Số điểm Speed = 0 nhưng di chuyển > 100m: 1083
+Số điểm Speed > 5 nhưng GPS di chuyển < 5m: 0
+
+
+=== BƯỚC 15: Chuẩn hóa Address ===
+Số Address bị thiếu: 0
+
+
+=== BƯỚC 17: Gắn cờ lỗi và lưu file ===
+-> Đã hoàn thành xe Car 5 và lưu kết quả vào file CarFuelHistory_Car5_Flags.csv
+
+======================================================================
+
