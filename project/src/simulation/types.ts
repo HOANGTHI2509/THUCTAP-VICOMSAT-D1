@@ -15,7 +15,10 @@ export interface TripPoint {
   t: number;
   speed: number;
   rawFuel: number;
-  filteredFuel: number;
+  adaptiveKalman: number;
+  traditionalKalman: number;
+  mlKalman?: number;
+  cnn1DFuel?: number;
   noise: number;
   isSpike: boolean;
 }

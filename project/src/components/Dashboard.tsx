@@ -82,7 +82,7 @@ function FuelReadout({ value, label, color, flashing }: {
 export default function Dashboard({ current, playing }: Props) {
   const speed = current?.speed ?? 0;
   const raw = current?.rawFuel ?? 0;
-  const filtered = current?.filteredFuel ?? 0;
+  const filtered = current?.adaptiveKalman ?? 0;
   const isSpike = current?.isSpike ?? false;
   const alert = isSpike && playing;
 

@@ -99,7 +99,7 @@ export function samplePoint(trip: Trip, t: number, prev: TripPoint | null): Trip
   const brakingNoise = speedChange < -16 ? -Math.min(7, Math.abs(speedChange) * 0.22) : 0;
   const baseFuelDrain = 0.012 + (speed / 90) * 0.03;
 
-  const baseFuel = prev ? prev.filteredFuel - baseFuelDrain : 78;
+  const baseFuel = prev ? prev.adaptiveKalman - baseFuelDrain : 78;
 
   let noise = (rand() - 0.5) * 1.6;
   if (trip.noiseKind === "spiky") {
@@ -123,13 +123,14 @@ export function samplePoint(trip: Trip, t: number, prev: TripPoint | null): Trip
 
   const rawFuel = Math.max(0, Math.min(100, baseFuel + noise));
 
-  const filtered = prev ? prev.filteredFuel - baseFuelDrain : baseFuel;
+  const filtered = prev ? prev.adaptiveKalman - baseFuelDrain : baseFuel;
 
   return {
     t,
     speed,
     rawFuel,
-    filteredFuel: Math.max(0, filtered),
+    adaptiveKalman: Math.max(0, filtered),
+    traditionalKalman: Math.max(0, filtered),
     noise: rawFuel - filtered,
     isSpike: Math.abs(noise) > SPIKE_THRESHOLD || eventFlag,
   };

@@ -1,3 +1,4 @@
+# Trình điều khiển Dashboard (Đã cập nhật Model N=10 Clamped)
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -17,6 +18,7 @@ from src.core.filters import median_filter as mf
 import src.core.filters.kalman_adaptive as ka
 from src.core.filters.kalman_adaptive import BoLocKalmanThichNghi1D, is_valid_measurement
 from src.core.filters.kalman_ml import BoLocKalmanAI, predict_batch
+from src.core.filters import cnn_1d_filter as cnn
 try:
     from src.utils.calculate_metrics import calculate_metrics
 except ImportError:
@@ -39,7 +41,7 @@ st.markdown("**Trực quan hóa và so sánh hiệu năng 3 thuật toán: Movin
 @st.cache_data
 def load_data(car_id):
     # Dữ liệu đã qua tiền xử lý, bao gồm các Flag và SegmentID
-    file_path = f"data/processed/CarFuelHistory_Processed_Car{car_id}.csv"
+    file_path = f"data/processed/CarFuelHistory_Processed_{car_id}.csv"
     if not os.path.exists(file_path):
         st.error(f"Không tìm thấy file dữ liệu: {file_path}")
         return pd.DataFrame()
@@ -57,7 +59,7 @@ if not csv_files:
     st.error("Không tìm thấy dữ liệu đã xử lý. Vui lòng chạy file preprocess_pipeline.py trước.")
     st.stop()
 
-cars = [os.path.basename(f).replace("CarFuelHistory_Processed_Car", "").replace(".csv", "") for f in csv_files]
+cars = [os.path.basename(f).replace("CarFuelHistory_Processed_", "").replace(".csv", "") for f in csv_files]
 
 with st.sidebar:
     st.header("⚙️ Cấu hình Dữ liệu")
@@ -155,10 +157,12 @@ with st.spinner("Đang chạy 3 thuật toán lọc nhiễu..."):
         kf_std = None
         kf_adapt = None
         kf_ml = None
+        kf_cnn = cnn.BoLocCNN1D()
         
         kalman_std_vals = []
         kalman_adapt_vals = []
         kalman_ml_vals = []
+        kalman_cnn_vals = []
         
         reference_gap = 5.0
         khoang_thoi_gian_tich_luy_std = 0.0
@@ -183,6 +187,7 @@ with st.spinner("Đang chạy 3 thuật toán lọc nhiễu..."):
                 kalman_std_vals.append(np.nan)
                 kalman_adapt_vals.append(np.nan)
                 kalman_ml_vals.append(np.nan)
+                kalman_cnn_vals.append(np.nan)
                 continue
             
             measurement = float(dong.FuelLevel)
@@ -213,10 +218,13 @@ with st.spinner("Đang chạy 3 thuật toán lọc nhiễu..."):
                 kalman_ml_vals.append(measurement)
             else:
                 kalman_ml_vals.append(kf_ml.cap_nhat(measurement, ty_le_dt=dt_ratio, nhan_ai=ml_lbl))
+            
+            kalman_cnn_vals.append(kf_cnn.cap_nhat(measurement))
                     
         df_seg.loc[group.index, 'Custom_Kalman'] = kalman_std_vals
         df_seg.loc[group.index, 'Custom_Adaptive_Kalman'] = kalman_adapt_vals
         df_seg.loc[group.index, 'Custom_ML_Kalman'] = kalman_ml_vals
+        df_seg.loc[group.index, 'Custom_CNN1D'] = kalman_cnn_vals
 
 # Restore original order just in case
 df_seg = df_seg.sort_values("_OriginalOrder", kind="stable").drop(columns="_OriginalOrder")
@@ -285,6 +293,11 @@ for seg_id, group in df_seg.groupby('SegmentID', sort=False):
     fig.add_trace(go.Scattergl(x=group['FuelTime'], y=group['Custom_ML_Kalman'], 
                              mode='lines', name=f'Kalman Filter (AI/ML)', legendgroup='ml', showlegend=show_legend,
                              line=dict(color='deeppink', width=3), visible='legendonly', connectgaps=True), row=1, col=1, secondary_y=False)
+                             
+    # CNN 1D
+    fig.add_trace(go.Scattergl(x=group['FuelTime'], y=group['Custom_CNN1D'], 
+                             mode='lines', name=f'CNN 1D (AI)', legendgroup='cnn', showlegend=show_legend,
+                             line=dict(color='#FFD700', width=3), connectgaps=True), row=1, col=1, secondary_y=False)
                              
     show_legend = False
 

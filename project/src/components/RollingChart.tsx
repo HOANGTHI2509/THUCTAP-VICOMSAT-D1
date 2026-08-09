@@ -16,14 +16,155 @@ const DEFAULT_ZOOM = 2;
 
 export default function RollingChart({ trip, points, cursor, windowSec, playing }: Props) {
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [showTraditional, setShowTraditional] = useState(false);
+  const [showML, setShowML] = useState(false);
+  const [showCNN, setShowCNN] = useState(true);
+  
+  const [hoverMouse, setHoverMouse] = useState<{ x: number, y: number } | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!wrapperRef.current) return;
+    const rect = wrapperRef.current.getBoundingClientRect();
+    setHoverMouse({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+  };
+
+  const handleMouseLeave = () => {
+    setHoverMouse(null);
+  };
+
+  let hoverData = null;
+  if (hoverMouse && wrapperRef.current) {
+    const padL = 52;
+    const padR = 14;
+    const plotW = wrapperRef.current.clientWidth - padL - padR;
+    const { x, y } = hoverMouse;
+    
+    if (x >= padL && x <= wrapperRef.current.clientWidth - padR) {
+      const tMax = Math.max(cursor, windowSec);
+      const tMin = tMax - windowSec;
+      const t = tMin + ((x - padL) / plotW) * windowSec;
+      
+      const visible = points.filter((p) => p.t >= tMin && p.t <= tMax);
+      if (visible.length > 0) {
+        let closest = visible[0];
+        let minDiff = Math.abs(closest.t - t);
+        for (let i = 1; i < visible.length; i++) {
+          const diff = Math.abs(visible[i].t - t);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closest = visible[i];
+          }
+        }
+        const lineX = padL + ((closest.t - tMin) / windowSec) * plotW;
+        hoverData = { point: closest, lineX, mouseX: x, mouseY: y };
+      }
+    }
+  }
 
   return (
-    <div className="relative flex-1 min-w-0 rounded-2xl bg-cockpit-900 border border-cockpit-700 shadow-2xl overflow-hidden flex flex-col transition-colors duration-300">
+    <div 
+      ref={wrapperRef}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      className="relative flex-1 min-w-0 rounded-2xl bg-cockpit-900 border border-cockpit-700 shadow-2xl overflow-hidden flex flex-col transition-colors duration-300"
+    >
+      {hoverData && wrapperRef.current && (
+        <>
+          <div 
+            className="absolute top-0 bottom-0 border-l border-dashed border-cockpit-400 pointer-events-none z-40"
+            style={{ left: hoverData.lineX }}
+          />
+          <div 
+            className="absolute pointer-events-none z-50 bg-cockpit-800/95 backdrop-blur-sm border border-cockpit-600 shadow-xl rounded-lg p-3 text-[11px] text-cockpit-200 flex flex-col gap-1.5 min-w-[160px]"
+            style={{
+              left: Math.min(hoverData.mouseX + 15, wrapperRef.current.clientWidth - 180),
+              top: Math.min(hoverData.mouseY + 15, wrapperRef.current.clientHeight - 180),
+            }}
+          >
+            <div className="font-semibold text-cockpit-100 border-b border-cockpit-700 pb-1 mb-1">
+              {formatHoverTime(trip.startTimeStr, hoverData.point.t)}
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-cockpit-400">Vận tốc:</span>
+              <span className="font-mono font-semibold text-speed">{hoverData.point.speed.toFixed(1)} km/h</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-cockpit-400">Xăng gốc:</span>
+              <span className="font-mono font-semibold text-fuel-raw">{hoverData.point.rawFuel.toFixed(1)} L</span>
+            </div>
+            <div className="flex justify-between gap-4">
+              <span className="text-cockpit-400">Adaptive K.:</span>
+              <span className="font-mono font-semibold text-fuel-filter">{hoverData.point.adaptiveKalman.toFixed(1)} L</span>
+            </div>
+            {showML && hoverData.point.mlKalman !== undefined && (
+              <div className="flex justify-between gap-4">
+                <span className="text-cockpit-400">AI K.:</span>
+                <span className="font-mono font-semibold text-blue-400">{hoverData.point.mlKalman.toFixed(1)} L</span>
+              </div>
+            )}
+            {showCNN && hoverData.point.cnn1DFuel !== undefined && (
+              <div className="flex justify-between gap-4">
+                <span className="text-cockpit-400">CNN 1D:</span>
+                <span className="font-mono font-semibold text-emerald-400">{hoverData.point.cnn1DFuel.toFixed(1)} L</span>
+              </div>
+            )}
+            {showTraditional && (
+              <div className="flex justify-between gap-4">
+                <span className="text-cockpit-400">Trad. K.:</span>
+                <span className="font-mono font-semibold text-purple-400">{hoverData.point.traditionalKalman.toFixed(1)} L</span>
+              </div>
+            )}
+          </div>
+        </>
+      )}
       <ChartPanel mode="speed" points={points} cursor={cursor} windowSec={windowSec} playing={playing} trip={trip} />
       <div className="flex items-center justify-between px-5 py-2 bg-cockpit-900 border-y border-cockpit-700 shrink-0">
-        <div className="flex items-center gap-2">
-          <Activity size={16} className="text-fuel-filter" />
-          <span className="text-xs font-semibold text-cockpit-100">Nhiên liệu — Gốc và sau lọc</span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <Activity size={16} className="text-fuel-filter" />
+            <span className="text-xs font-semibold text-cockpit-100">Nhiên liệu — Gốc và sau lọc</span>
+          </div>
+          <div className="flex items-center gap-4 text-[11px] ml-2 border-l border-cockpit-700 pl-4">
+            <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-fuel-raw" /><span className="text-cockpit-300">Xăng gốc</span></span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-fuel-filter" /><span className="text-cockpit-300">Adaptive Kalman</span></span>
+            <label className="flex items-center gap-1.5 cursor-pointer hover:bg-cockpit-700 px-2 py-1 rounded transition-colors">
+              <input 
+                type="checkbox" 
+                checked={showML} 
+                onChange={(e) => setShowML(e.target.checked)}
+                className="accent-blue-500 rounded cursor-pointer"
+              />
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-0.5 bg-blue-500" />
+                <span className="text-[10px] uppercase tracking-widest text-cockpit-400">AI Kalman</span>
+              </span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer hover:bg-cockpit-700 px-2 py-1 rounded transition-colors">
+              <input 
+                type="checkbox" 
+                checked={showCNN} 
+                onChange={(e) => setShowCNN(e.target.checked)}
+                className="accent-emerald-500 rounded cursor-pointer"
+              />
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-0.5 bg-emerald-500" />
+                <span className="text-[10px] uppercase tracking-widest text-cockpit-400">CNN 1D</span>
+              </span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer hover:bg-cockpit-700 px-2 py-1 rounded transition-colors">
+              <input 
+                type="checkbox" 
+                checked={showTraditional} 
+                onChange={(e) => setShowTraditional(e.target.checked)}
+                className="accent-purple-500 rounded cursor-pointer"
+              />
+              <span className="flex items-center gap-1.5">
+                <span className="w-3 h-0.5 bg-purple-500" />
+                <span className="text-[10px] uppercase tracking-widest text-cockpit-400">Traditional Kalman</span>
+              </span>
+            </label>
+          </div>
         </div>
         <div className="flex items-center gap-1 text-[11px]">
           <ZoomIn size={13} className="text-cockpit-400 mr-1" />
@@ -39,12 +180,12 @@ export default function RollingChart({ trip, points, cursor, windowSec, playing 
           ))}
         </div>
       </div>
-      <ChartPanel mode="fuel" points={points} cursor={cursor} windowSec={windowSec} playing={playing} zoom={zoom} trip={trip} />
+      <ChartPanel mode="fuel" points={points} cursor={cursor} windowSec={windowSec} playing={playing} zoom={zoom} trip={trip} showTraditional={showTraditional} showML={showML} showCNN={showCNN} />
     </div>
   );
 }
 
-function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip }: {
+function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, showTraditional = false, showML = false, showCNN = false }: {
   mode: ChartMode;
   points: TripPoint[];
   cursor: number;
@@ -52,6 +193,9 @@ function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip }
   playing: boolean;
   zoom?: number;
   trip: Trip;
+  showTraditional?: boolean;
+  showML?: boolean;
+  showCNN?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -71,29 +215,28 @@ function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip }
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      draw(ctx, width, height, points, cursor, windowSec, mode, zoom, trip);
+      draw(ctx, width, height, points, cursor, windowSec, mode, zoom, trip, showTraditional, showML, showCNN);
     };
     render();
     window.addEventListener("resize", render);
     return () => window.removeEventListener("resize", render);
-  }, [points, cursor, windowSec, mode, zoom, playing]);
+  }, [points, cursor, windowSec, mode, zoom, playing, showTraditional, showML, showCNN]);
 
   return (
-    <div ref={containerRef} className={`relative w-full ${mode === "speed" ? "h-[150px]" : "h-[230px]"} shrink-0`}>
+    <div ref={containerRef} className={`relative w-full ${mode === "speed" ? "h-[160px]" : "h-[240px]"} shrink-0`}>
       <canvas ref={canvasRef} className="block w-full h-full" />
-      {mode === "speed" && <div className="absolute top-2 left-5 flex items-center gap-2 pointer-events-none"><Gauge size={15} className="text-speed" /><span className="text-xs font-semibold text-cockpit-200">Vận tốc xe</span><span className="text-[10px] text-cockpit-400">km/h</span></div>}
-      {mode === "fuel" && <div className="absolute top-2 left-5 flex items-center gap-4 text-[11px] pointer-events-none"><span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-fuel-raw" /><span className="text-cockpit-300">Xăng gốc</span></span><span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-fuel-filter" /><span className="text-cockpit-300">Sau lọc</span></span></div>}
+      {mode === "speed" && <div className="absolute top-2 left-[60px] flex items-center gap-2 pointer-events-none"><Gauge size={15} className="text-speed" /><span className="text-xs font-semibold text-cockpit-200">Vận tốc xe</span><span className="text-[10px] text-cockpit-400">km/h</span></div>}
       {!playing && points.length > 0 && <div className="absolute top-2 right-4 text-[10px] uppercase tracking-widest text-cockpit-400 bg-cockpit-800/80 px-2 py-1 rounded">Đã tạm dừng</div>}
       {points.length === 0 && <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-cockpit-500"><Waves size={34} className="opacity-40" /><span className="text-sm">Bấm Play để bắt đầu đo</span></div>}
     </div>
   );
 }
 
-function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripPoint[], cursor: number, windowSec: number, mode: ChartMode, zoom: number, trip: Trip) {
+function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripPoint[], cursor: number, windowSec: number, mode: ChartMode, zoom: number, trip: Trip, showTraditional: boolean = false, showML: boolean = false, showCNN: boolean = false) {
   const padL = 52;
   const padR = 14;
   const padT = 14;
-  const padB = 24;
+  const padB = 44;
   const plotW = w - padL - padR;
   const plotH = h - padT - padB;
   const tMax = Math.max(cursor, windowSec);
@@ -113,7 +256,13 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
   ctx.strokeStyle = gridColor;
   ctx.lineWidth = 1;
 
-  const allVisibleValues = visible.flatMap((point) => [point.filteredFuel, point.rawFuel]);
+  const allVisibleValues = visible.flatMap((point) => {
+    const vals = [point.adaptiveKalman, point.rawFuel];
+    if (showTraditional) vals.push(point.traditionalKalman);
+    if (showML && point.mlKalman !== undefined) vals.push(point.mlKalman);
+    if (showCNN && point.cnn1DFuel !== undefined) vals.push(point.cnn1DFuel);
+    return vals;
+  });
   const minVisible = allVisibleValues.length ? Math.min(...allVisibleValues) : 0;
   const maxVisible = allVisibleValues.length ? Math.max(...allVisibleValues) : 100;
   
@@ -157,8 +306,8 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
     const timeStr = `${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`;
     const dateStr = `${dt.getDate().toString().padStart(2, "0")}/${(dt.getMonth() + 1).toString().padStart(2, "0")}`;
     
-    ctx.fillText(timeStr, x, padT + plotH + 15);
-    ctx.fillText(dateStr, x, padT + plotH + 28);
+    ctx.fillText(timeStr, x, padT + plotH + 18);
+    ctx.fillText(dateStr, x, padT + plotH + 34);
   }
 
   if (visible.length === 0) return;
@@ -173,7 +322,16 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
     }
     drawLine(ctx, visible, (point) => yOf(point.rawFuel), xOf, withAlpha(rawHex, 0.35), 1, 0);
     drawLine(ctx, visible, (point) => yOf(point.rawFuel), xOf, rawHex, 1.6, 6);
-    drawLine(ctx, visible, (point) => yOf(point.filteredFuel), xOf, filterHex, 2.4, 8);
+    if (showTraditional) {
+      drawLine(ctx, visible, (point) => yOf(point.traditionalKalman), xOf, "#a855f7", 2.0, 6); // purple-500
+    }
+    if (showML) {
+      drawLine(ctx, visible, (point) => yOf(point.mlKalman !== undefined ? point.mlKalman : point.adaptiveKalman), xOf, "#3b82f6", 2.4, 6); // blue-500
+    }
+    if (showCNN) {
+      drawLine(ctx, visible, (point) => yOf(point.cnn1DFuel !== undefined ? point.cnn1DFuel : point.adaptiveKalman), xOf, "#10b981", 2.6, 6); // emerald-500
+    }
+    drawLine(ctx, visible, (point) => yOf(point.adaptiveKalman), xOf, filterHex, 2.4, 8);
   } else {
     drawLine(ctx, visible, (point) => yOf(point.speed), xOf, speedHex, 2.4, 6);
   }
@@ -189,7 +347,7 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
   ctx.setLineDash([]);
   ctx.fillStyle = accent;
   ctx.beginPath();
-  ctx.arc(lastX, yOf(mode === "speed" ? last.speed : last.filteredFuel), 4, 0, Math.PI * 2);
+  ctx.arc(lastX, yOf(mode === "speed" ? last.speed : last.adaptiveKalman), 4, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -217,3 +375,12 @@ function withAlpha(hex: string, alpha: number): string {
   if (value.length !== 6) return hex;
   return `rgba(${parseInt(value.slice(0, 2), 16)}, ${parseInt(value.slice(2, 4), 16)}, ${parseInt(value.slice(4, 6), 16)}, ${alpha})`;
 }
+
+function formatHoverTime(startTimeStr: string, t: number) {
+  const startMs = new Date(startTimeStr).getTime();
+  const dt = new Date(startMs + t * 1000);
+  const timeStr = `${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}:${dt.getSeconds().toString().padStart(2, "0")}`;
+  const dateStr = `${dt.getDate().toString().padStart(2, "0")}/${(dt.getMonth() + 1).toString().padStart(2, "0")}`;
+  return `${timeStr} - ${dateStr}`;
+}
+
