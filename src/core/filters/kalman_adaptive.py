@@ -29,6 +29,10 @@ class BoLocKalmanThichNghi1D:
         self.so_nhip_nhieu_lon = 0
         self.dau_nhieu_truoc_do = 0
         self.trang_thai_xe_truoc_do = 1  # Mặc định là xe đang chạy
+        
+        # Khóa cảm biến (Sensor Failure Lock)
+        self.is_sensor_locked = False
+        self.sensor_lock_counter = 0
 
     def cap_nhat(self, gia_tri_do: float, ty_le_dt: float = 1.0, trang_thai_chuyen_dong: int = 1, gia_toc: float = 0.0) -> float:
         z = float(gia_tri_do)
@@ -36,7 +40,15 @@ class BoLocKalmanThichNghi1D:
         # Đặc xá: Nếu chu kỳ trước xe đang dừng, sự thay đổi mức nhiên liệu thường là sự thay đổi vật lý thực tế.
         trang_thai_thuc_te = 0 if self.trang_thai_xe_truoc_do == 0 else trang_thai_chuyen_dong
 
-        nguong_cho_phep_hien_tai = self.persistence_required
+        # Tự động điều chỉnh Nhịp chờ (Adaptive Persistence)
+        if trang_thai_thuc_te == 0:
+            # Xe đỗ: Cực kỳ nhạy với mất xăng (trộm). Ép nhịp chờ xuống mức tối thiểu (1 nhịp).
+            nguong_cho_phep_hien_tai = 1
+        else:
+            # Xe chạy: Cực kỳ bảo thủ với biến động (dốc dài, xóc). Đẩy nhịp chờ lên cao để lọc nhiễu 4 điểm.
+            # Lấy cài đặt của người dùng (thường là 3) cộng thêm 1 hoặc 2.
+            nguong_cho_phep_hien_tai = max(4, self.persistence_required + 1)
+
         r_dot_bien_hien_tai = self.r_spike
         
         # Khi xe dừng, nhiễu sóng sánh ít hơn, nên hạ ngưỡng phát hiện (threshold) xuống để nhạy với bơm/rút nhỏ
@@ -61,8 +73,35 @@ class BoLocKalmanThichNghi1D:
 
         self.dau_nhieu_truoc_do = dau_hien_tai
 
+        # --- KIỂM TRA SENSOR FAILURE LOCK ---
+        is_locked_this_tick = False
+        if self.is_sensor_locked:
+            if phan_du > -15.0:
+                # Xăng đã hồi lại (sai số < 15L), mở khóa cảm biến
+                self.is_sensor_locked = False
+                self.sensor_lock_counter = 0
+            else:
+                self.sensor_lock_counter += 1
+                if self.sensor_lock_counter > 6:
+                    # Timeout (hơn 30 phút). Chấp nhận sự thật (Trộm siêu tốc hoặc Vỡ bình)
+                    self.is_sensor_locked = False
+                    self.sensor_lock_counter = 0
+                else:
+                    is_locked_this_tick = True
+
+        if not self.is_sensor_locked and not is_locked_this_tick and phan_du < -50.0:
+            # Tụt một phát hơn 50 lít -> Chập cảm biến / Mất kết nối
+            self.is_sensor_locked = True
+            self.sensor_lock_counter = 1
+            is_locked_this_tick = True
+        # ------------------------------------
+
+        # 0. Lỗi cảm biến (Sensor Failure Lock)
+        if is_locked_this_tick:
+            R_thich_nghi = r_dot_bien_hien_tai * 10.0  # Đóng băng tuyệt đối đường dự đoán
+            Q_thich_nghi = self.Q * 0.1
         # 1. Innovation Gating (Gai nhiễu đơn lẻ)
-        if (
+        elif (
             phan_du_tuyet_doi > nguong_bat_nhay_hien_tai
             and self.so_nhip_nhieu_lon < nguong_cho_phep_hien_tai
         ):

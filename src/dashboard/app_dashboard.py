@@ -1,4 +1,4 @@
-# Trình điều khiển Dashboard (Đã cập nhật Model N=10 Clamped)
+# Trình điều khiển Dashboard (Đã khôi phục Segment cũ)
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -40,11 +40,12 @@ st.markdown("**Trực quan hóa và so sánh hiệu năng 3 thuật toán: Movin
 
 @st.cache_data
 def load_data(car_id):
-    # Dữ liệu đã qua tiền xử lý, bao gồm các Flag và SegmentID
-    file_path = f"data/processed/CarFuelHistory_Processed_{car_id}.csv"
+    file_path = f"data/processed/CarFuelHistory_{car_id}_Features.csv"
+    
     if not os.path.exists(file_path):
-        st.error(f"Không tìm thấy file dữ liệu: {file_path}")
+        st.error(f"Không tìm thấy file dữ liệu cho xe: {car_id}")
         return pd.DataFrame()
+        
     df = pd.read_csv(file_path)
     df['FuelTime'] = pd.to_datetime(df['FuelTime'], errors="coerce")
     df['FuelLevel'] = pd.to_numeric(df['FuelLevel'], errors="coerce")
@@ -53,13 +54,14 @@ def load_data(car_id):
 
 import glob
 
-# Get available cars
-csv_files = glob.glob("data/processed/CarFuelHistory_Processed_*.csv")
-if not csv_files:
-    st.error("Không tìm thấy dữ liệu đã xử lý. Vui lòng chạy file preprocess_pipeline.py trước.")
+csv_files_5 = glob.glob("data/processed/CarFuelHistory_Car*_Features.csv")
+csv_files_5 = [f for f in csv_files_5 if "_CNN1D" not in f]
+
+if not csv_files_5:
+    st.error("Không tìm thấy dữ liệu đã xử lý của 5 xe cũ.")
     st.stop()
 
-cars = [os.path.basename(f).replace("CarFuelHistory_Processed_", "").replace(".csv", "") for f in csv_files]
+cars = sorted([os.path.basename(f).replace("CarFuelHistory_", "").replace("_Features.csv", "") for f in csv_files_5])
 
 with st.sidebar:
     st.header("⚙️ Cấu hình Dữ liệu")
@@ -70,13 +72,16 @@ df = load_data(selected_car)
 min_date = df['FuelTime'].min().date()
 max_date = df['FuelTime'].max().date()
 
+# Đặt mặc định chỉ hiển thị 7 ngày cuối cùng để tránh biểu đồ bị nén thành mã vạch (Bar-code effect) đối với xe có lịch sử quá dài (vài tháng)
+default_start_date = max(min_date, max_date - pd.Timedelta(days=7))
+
 with st.sidebar:
     st.markdown("---")
     st.header("📅 Bộ lọc Thời gian")
     
     # Check if car changed, if so, reset the date range
     if "last_car" not in st.session_state or st.session_state.last_car != selected_car:
-        st.session_state.date_range_key = (min_date, max_date)
+        st.session_state.date_range_key = (default_start_date, max_date)
         st.session_state.last_car = selected_car
         
     def reset_date_range():
@@ -111,8 +116,6 @@ with st.sidebar:
     
     st.markdown("---")
     st.header("🎛️ Tinh chỉnh Thuật toán")
-    ma_window = st.slider("Cửa sổ Moving Average (N)", min_value=3, max_value=50, value=10, step=1)
-    med_window = st.slider("Cửa sổ Median Filter (N)", min_value=3, max_value=50, value=10, step=1)
     kalman_r = st.slider("Nhiễu đo lường Kalman (R)", min_value=1, max_value=1000, value=9, step=1)
     
     st.subheader("🤖 Cấu hình Adaptive Kalman")
@@ -130,12 +133,10 @@ df_seg["_OriginalOrder"] = np.arange(len(df_seg))
 df_seg = df_seg.sort_values(["SegmentID", "FuelTime", "_OriginalOrder"], kind="stable")
 
 # Apply Custom Algorithms
-with st.spinner("Đang chạy 3 thuật toán lọc nhiễu..."):
-    df_seg['Custom_MA'] = np.nan
-    df_seg['Custom_Median'] = np.nan
+with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
     df_seg['Custom_Kalman'] = np.nan
     df_seg['Custom_Adaptive_Kalman'] = np.nan
-    df_seg['Custom_ML_Kalman'] = np.nan
+    df_seg['Custom_CNN1D'] = np.nan
     
     # Tiền xử lý: Tính Gia tốc (Acceleration) nếu chưa có
     if "Acceleration" not in df_seg.columns:
@@ -150,30 +151,20 @@ with st.spinner("Đang chạy 3 thuật toán lọc nhiễu..."):
     for seg_id, group in df_seg.groupby('SegmentID', sort=False, dropna=False):
         fuels = group['FuelLevel'].tolist()
         
-        # MA & Median (Imported from our robust modules)
-        df_seg.loc[group.index, 'Custom_MA'] = ma.tinh_loc_trung_binh_dong(fuels, ma_window)
-        df_seg.loc[group.index, 'Custom_Median'] = mf.tinh_loc_trung_vi(fuels, med_window)
-        
         kf_std = None
         kf_adapt = None
-        kf_ml = None
         kf_cnn = cnn.BoLocCNN1D()
         
         kalman_std_vals = []
         kalman_adapt_vals = []
-        kalman_ml_vals = []
         kalman_cnn_vals = []
         
         reference_gap = 5.0
         khoang_thoi_gian_tich_luy_std = 0.0
         khoang_thoi_gian_tich_luy_adapt = 0.0
         
-        # Batch predict cho ML
-        ml_labels = predict_batch(group)
-        
         for i_loc, dong in enumerate(group.itertuples()):
             idx = dong.Index
-            ml_lbl = ml_labels[i_loc]
             gap = getattr(dong, "TimeGapMinutes", reference_gap)
             if pd.isna(gap) or gap <= 0: gap = reference_gap
             
@@ -186,7 +177,6 @@ with st.spinner("Đang chạy 3 thuật toán lọc nhiễu..."):
                 khoang_thoi_gian_tich_luy_adapt += gap
                 kalman_std_vals.append(np.nan)
                 kalman_adapt_vals.append(np.nan)
-                kalman_ml_vals.append(np.nan)
                 kalman_cnn_vals.append(np.nan)
                 continue
             
@@ -212,35 +202,16 @@ with st.spinner("Đang chạy 3 thuật toán lọc nhiễu..."):
             else:
                 kalman_adapt_vals.append(kf_adapt.cap_nhat(measurement, ty_le_dt=khoang_thoi_gian_adapt/reference_gap, trang_thai_chuyen_dong=movement_state, gia_toc=acceleration))
                 
-            # Kalman ML
-            if kf_ml is None:
-                kf_ml = BoLocKalmanAI(trang_thai_ban_dau=measurement, r_co_ban=kalman_r)
-                kalman_ml_vals.append(measurement)
-            else:
-                kalman_ml_vals.append(kf_ml.cap_nhat(measurement, ty_le_dt=dt_ratio, nhan_ai=ml_lbl))
+            # Kalman CNN1D
+            val_cnn = kf_cnn.cap_nhat(measurement)
+            kalman_cnn_vals.append(val_cnn)
             
-            kalman_cnn_vals.append(kf_cnn.cap_nhat(measurement))
-                    
         df_seg.loc[group.index, 'Custom_Kalman'] = kalman_std_vals
         df_seg.loc[group.index, 'Custom_Adaptive_Kalman'] = kalman_adapt_vals
-        df_seg.loc[group.index, 'Custom_ML_Kalman'] = kalman_ml_vals
         df_seg.loc[group.index, 'Custom_CNN1D'] = kalman_cnn_vals
 
 # Restore original order just in case
 df_seg = df_seg.sort_values("_OriginalOrder", kind="stable").drop(columns="_OriginalOrder")
-
-# Insert NaN rows between segments to prevent Plotly from connecting lines across huge time gaps
-if selected_segment == "Toàn bộ dữ liệu trong khoảng thời gian (All)":
-    mask = df_seg['SegmentID'] != df_seg['SegmentID'].shift(1)
-    mask.iloc[0] = False
-    if mask.any():
-        nan_rows = df_seg[mask].copy()
-        for col in nan_rows.columns:
-            if col != 'FuelTime':
-                nan_rows[col] = np.nan
-        # Shift time slightly so it inserts perfectly between the two segments
-        nan_rows['FuelTime'] = nan_rows['FuelTime'] - pd.Timedelta(seconds=1)
-        df_seg = pd.concat([df_seg, nan_rows]).sort_values("FuelTime")
 
 # Metric cards
 st.markdown("### 📊 Thông số phân đoạn hiện tại")
@@ -264,38 +235,22 @@ fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
 show_legend = True
 for seg_id, group in df_seg.groupby('SegmentID', sort=False):
     # Raw Fuel
-    fig.add_trace(go.Scattergl(x=group['FuelTime'], y=group['FuelLevel'], 
-                             mode='lines+markers', name='Raw FuelLevel', legendgroup='raw', showlegend=show_legend,
-                             line=dict(color='rgba(255, 0, 0, 0.6)', width=1.5),
-                             marker=dict(size=4, color='red')), row=1, col=1, secondary_y=False)
-                             
-    # Moving Average
-    fig.add_trace(go.Scattergl(x=group['FuelTime'], y=group['Custom_MA'], 
-                             mode='lines', name=f'Moving Average (N={ma_window})', legendgroup='ma', showlegend=show_legend,
-                             line=dict(color='#FFA15A', width=2), visible='legendonly', connectgaps=True), row=1, col=1, secondary_y=False)
-                             
-    # Median Filter
-    fig.add_trace(go.Scattergl(x=group['FuelTime'], y=group['Custom_Median'], 
-                             mode='lines', name=f'Median Filter (N={med_window})', legendgroup='med', showlegend=show_legend,
-                             line=dict(color='#AB63FA', width=2), visible='legendonly', connectgaps=True), row=1, col=1, secondary_y=False)
+    fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['FuelLevel'], 
+                             mode='lines+markers', name=f'Raw FuelLevel', legendgroup='raw', showlegend=show_legend,
+                             line=dict(color='red', width=1), marker=dict(size=4), connectgaps=True), row=1, col=1, secondary_y=False)
                              
     # Kalman Standard
-    fig.add_trace(go.Scattergl(x=group['FuelTime'], y=group['Custom_Kalman'], 
+    fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Custom_Kalman'], 
                              mode='lines', name=f'Kalman Filter (R={kalman_r})', legendgroup='kalman', showlegend=show_legend,
                              line=dict(color='#00CC96', width=2), connectgaps=True), row=1, col=1, secondary_y=False)
                              
     # Kalman Adaptive
-    fig.add_trace(go.Scattergl(x=group['FuelTime'], y=group['Custom_Adaptive_Kalman'], 
+    fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Custom_Adaptive_Kalman'], 
                              mode='lines', name=f'Adaptive Kalman (Dynamic R)', legendgroup='adapt', showlegend=show_legend,
                              line=dict(color='blue', width=2, dash='dash'), connectgaps=True), row=1, col=1, secondary_y=False)
                              
-    # Kalman ML
-    fig.add_trace(go.Scattergl(x=group['FuelTime'], y=group['Custom_ML_Kalman'], 
-                             mode='lines', name=f'Kalman Filter (AI/ML)', legendgroup='ml', showlegend=show_legend,
-                             line=dict(color='deeppink', width=3), visible='legendonly', connectgaps=True), row=1, col=1, secondary_y=False)
-                             
     # CNN 1D
-    fig.add_trace(go.Scattergl(x=group['FuelTime'], y=group['Custom_CNN1D'], 
+    fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Custom_CNN1D'], 
                              mode='lines', name=f'CNN 1D (AI)', legendgroup='cnn', showlegend=show_legend,
                              line=dict(color='#FFD700', width=3), connectgaps=True), row=1, col=1, secondary_y=False)
                              
@@ -304,21 +259,21 @@ for seg_id, group in df_seg.groupby('SegmentID', sort=False):
 # Highlight anomalous Deltas
 anomalies = df_seg[df_seg['FlagLargeDelta'] == 1]
 if not anomalies.empty:
-    fig.add_trace(go.Scattergl(x=anomalies['FuelTime'], y=anomalies['FuelLevel'],
+    fig.add_trace(go.Scatter(x=anomalies['FuelTime'], y=anomalies['FuelLevel'],
                              mode='markers', name='Sự kiện Sụt giảm mạnh',
                              visible='legendonly', # Ẩn mặc định, ấn vào legend mới hiện
                              marker=dict(color='red', size=10, symbol='x', line=dict(width=2, color='black'))), row=1, col=1, secondary_y=False)
 
 if 'Speed' in df_seg.columns:
     # Overlay speed for TOOLTIP ONLY (transparent line, no fill, no legend)
-    fig.add_trace(go.Scattergl(x=df_seg['FuelTime'], y=df_seg['Speed'], 
+    fig.add_trace(go.Scatter(x=df_seg['FuelTime'], y=df_seg['Speed'], 
                              mode='lines', name='Speed (km/h)', 
                              line=dict(color='rgba(0,0,0,0)', width=0),
                              showlegend=False), row=1, col=1, secondary_y=True)
 
 # 2. Speed Plot (Dedicated)
 if 'Speed' in df_seg.columns:
-    fig.add_trace(go.Scattergl(x=df_seg['FuelTime'], y=df_seg['Speed'], 
+    fig.add_trace(go.Scatter(x=df_seg['FuelTime'], y=df_seg['Speed'], 
                              mode='lines', name='Speed (km/h)', 
                              line=dict(color='#636EFA', width=1.5),
                              fill='tozeroy', fillcolor='rgba(99, 110, 250, 0.1)'), row=2, col=1)

@@ -87,14 +87,18 @@ if __name__ == '__main__':
         else:
             df['DistanceMeters'] = 0.0
     
-        # Điều kiện 3: Kiểm tra đỗ xe thật sự
+        # Điều kiện 3: Kiểm tra đỗ xe thật sự (Dùng cho cờ Suspicious Gap)
         prev_stopped = df['Speed'].shift(1) <= 5
         curr_stopped = df['Speed'] <= 5
         
         is_true_parking = (df['TimeGapMinutes'] > df['DynamicGapThreshold']) & prev_stopped & curr_stopped & (df['DistanceMeters'].fillna(0) <= 50)
         
-        # Chỉ cắt Segment khi đỗ xe thật sự hoặc bản ghi đầu tiên
-        is_new_segment = is_true_parking | df['TimeGapMinutes'].isna()
+        # Nhóm sử dụng 2 giờ (120 phút) làm ngưỡng hard-cut ban đầu. Các khoảng mất 
+        # tín hiệu ngắn hơn được phát hiện bằng ngưỡng động (DynamicGapThreshold)
+        # dựa trên chu kỳ truyền dữ liệu của từng xe và được gắn cờ (FlagLongGap) 
+        # thay vì cắt Segment. Sau đó nhóm sẽ đánh giá độ nhạy của ngưỡng hard-cut 
+        # để xác định giá trị phù hợp.
+        is_new_segment = (df['TimeGapMinutes'] >= 120) | df['TimeGapMinutes'].isna()
         df['SegmentID'] = is_new_segment.cumsum()
         df['IsSegmentStart'] = is_new_segment.astype(int)
         
