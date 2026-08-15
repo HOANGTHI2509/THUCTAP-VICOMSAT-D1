@@ -16,9 +16,7 @@ const DEFAULT_ZOOM = 2;
 
 export default function RollingChart({ trip, points, cursor, windowSec, playing }: Props) {
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
-  const [showTraditional, setShowTraditional] = useState(false);
   const [showML, setShowML] = useState(false);
-  const [showCNN, setShowCNN] = useState(true);
   
   const [hoverMouse, setHoverMouse] = useState<{ x: number, y: number } | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -99,20 +97,8 @@ export default function RollingChart({ trip, points, cursor, windowSec, playing 
             </div>
             {showML && hoverData.point.mlKalman !== undefined && (
               <div className="flex justify-between gap-4">
-                <span className="text-cockpit-400">AI K.:</span>
+                <span className="text-cockpit-400">Time-aware GRU:</span>
                 <span className="font-mono font-semibold text-blue-400">{hoverData.point.mlKalman.toFixed(1)} L</span>
-              </div>
-            )}
-            {showCNN && hoverData.point.cnn1DFuel !== undefined && (
-              <div className="flex justify-between gap-4">
-                <span className="text-cockpit-400">CNN 1D:</span>
-                <span className="font-mono font-semibold text-emerald-400">{hoverData.point.cnn1DFuel.toFixed(1)} L</span>
-              </div>
-            )}
-            {showTraditional && (
-              <div className="flex justify-between gap-4">
-                <span className="text-cockpit-400">Trad. K.:</span>
-                <span className="font-mono font-semibold text-purple-400">{hoverData.point.traditionalKalman.toFixed(1)} L</span>
               </div>
             )}
           </div>
@@ -137,31 +123,7 @@ export default function RollingChart({ trip, points, cursor, windowSec, playing 
               />
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-0.5 bg-blue-500" />
-                <span className="text-[10px] uppercase tracking-widest text-cockpit-400">AI Kalman</span>
-              </span>
-            </label>
-            <label className="flex items-center gap-1.5 cursor-pointer hover:bg-cockpit-700 px-2 py-1 rounded transition-colors">
-              <input 
-                type="checkbox" 
-                checked={showCNN} 
-                onChange={(e) => setShowCNN(e.target.checked)}
-                className="accent-emerald-500 rounded cursor-pointer"
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-emerald-500" />
-                <span className="text-[10px] uppercase tracking-widest text-cockpit-400">CNN 1D</span>
-              </span>
-            </label>
-            <label className="flex items-center gap-1.5 cursor-pointer hover:bg-cockpit-700 px-2 py-1 rounded transition-colors">
-              <input 
-                type="checkbox" 
-                checked={showTraditional} 
-                onChange={(e) => setShowTraditional(e.target.checked)}
-                className="accent-purple-500 rounded cursor-pointer"
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-purple-500" />
-                <span className="text-[10px] uppercase tracking-widest text-cockpit-400">Traditional Kalman</span>
+                <span className="text-[10px] uppercase tracking-widest text-cockpit-400">Time-aware GRU</span>
               </span>
             </label>
           </div>
@@ -180,12 +142,12 @@ export default function RollingChart({ trip, points, cursor, windowSec, playing 
           ))}
         </div>
       </div>
-      <ChartPanel mode="fuel" points={points} cursor={cursor} windowSec={windowSec} playing={playing} zoom={zoom} trip={trip} showTraditional={showTraditional} showML={showML} showCNN={showCNN} />
+      <ChartPanel mode="fuel" points={points} cursor={cursor} windowSec={windowSec} playing={playing} zoom={zoom} trip={trip} showML={showML} />
     </div>
   );
 }
 
-function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, showTraditional = false, showML = false, showCNN = false }: {
+function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, showML = false }: {
   mode: ChartMode;
   points: TripPoint[];
   cursor: number;
@@ -193,9 +155,7 @@ function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, 
   playing: boolean;
   zoom?: number;
   trip: Trip;
-  showTraditional?: boolean;
   showML?: boolean;
-  showCNN?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -215,12 +175,12 @@ function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, 
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      draw(ctx, width, height, points, cursor, windowSec, mode, zoom, trip, showTraditional, showML, showCNN);
+      draw(ctx, width, height, points, cursor, windowSec, mode, zoom, trip, showML);
     };
     render();
     window.addEventListener("resize", render);
     return () => window.removeEventListener("resize", render);
-  }, [points, cursor, windowSec, mode, zoom, playing, showTraditional, showML, showCNN]);
+  }, [points, cursor, windowSec, mode, zoom, playing, showML]);
 
   return (
     <div ref={containerRef} className={`relative w-full ${mode === "speed" ? "h-[160px]" : "h-[240px]"} shrink-0`}>
@@ -232,7 +192,7 @@ function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, 
   );
 }
 
-function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripPoint[], cursor: number, windowSec: number, mode: ChartMode, zoom: number, trip: Trip, showTraditional: boolean = false, showML: boolean = false, showCNN: boolean = false) {
+function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripPoint[], cursor: number, windowSec: number, mode: ChartMode, zoom: number, trip: Trip, showML: boolean = false) {
   const padL = 52;
   const padR = 14;
   const padT = 14;
@@ -258,9 +218,7 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
 
   const allVisibleValues = visible.flatMap((point) => {
     const vals = [point.adaptiveKalman, point.rawFuel];
-    if (showTraditional) vals.push(point.traditionalKalman);
     if (showML && point.mlKalman !== undefined) vals.push(point.mlKalman);
-    if (showCNN && point.cnn1DFuel !== undefined) vals.push(point.cnn1DFuel);
     return vals;
   });
   const minVisible = allVisibleValues.length ? Math.min(...allVisibleValues) : 0;
@@ -322,14 +280,8 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
     }
     drawLine(ctx, visible, (point) => yOf(point.rawFuel), xOf, withAlpha(rawHex, 0.35), 1, 0);
     drawLine(ctx, visible, (point) => yOf(point.rawFuel), xOf, rawHex, 1.6, 6);
-    if (showTraditional) {
-      drawLine(ctx, visible, (point) => yOf(point.traditionalKalman), xOf, "#a855f7", 2.0, 6); // purple-500
-    }
     if (showML) {
       drawLine(ctx, visible, (point) => yOf(point.mlKalman !== undefined ? point.mlKalman : point.adaptiveKalman), xOf, "#3b82f6", 2.4, 6); // blue-500
-    }
-    if (showCNN) {
-      drawLine(ctx, visible, (point) => yOf(point.cnn1DFuel !== undefined ? point.cnn1DFuel : point.adaptiveKalman), xOf, "#10b981", 2.6, 6); // emerald-500
     }
     drawLine(ctx, visible, (point) => yOf(point.adaptiveKalman), xOf, filterHex, 2.4, 8);
   } else {

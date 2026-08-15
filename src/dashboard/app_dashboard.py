@@ -12,13 +12,23 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 # Custom Imports
-from src.core.filters import kalman_traditional as kalman
-from src.core.filters import moving_average as ma
-from src.core.filters import median_filter as mf
-import src.core.filters.kalman_adaptive as ka
+from src.core.filters import kalman_traditional as kalman, kalman_adaptive
 from src.core.filters.kalman_adaptive import BoLocKalmanThichNghi1D, is_valid_measurement
-from src.core.filters.kalman_ml import BoLocKalmanAI, predict_batch
-from src.core.filters import cnn_1d_filter as cnn
+from src.core.filters.anomaly_detector import FuelAnomalyDetector
+import torch
+from src.models.time_aware_gru import FuelTimeAwareGRU
+from src.pipeline.evaluate_real_vcomsat import run_gru
+
+@st.cache_resource
+def load_gru_model():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = FuelTimeAwareGRU(input_dim=6, hidden_dim=64).to(device)
+    model.load_state_dict(torch.load('models/gru/best_gru_final.pth', map_location=device))
+    model.eval()
+    return model
+
+gru_model = load_gru_model()
+
 try:
     from src.utils.calculate_metrics import calculate_metrics
 except ImportError:
@@ -40,7 +50,7 @@ st.markdown("**Trực quan hóa và so sánh hiệu năng 3 thuật toán: Movin
 
 @st.cache_data
 def load_data(car_id):
-    file_path = f"data/processed/CarFuelHistory_{car_id}_Features.csv"
+    file_path = f"data/processed/CarFuelHistory_Processed_{car_id}.csv"
     
     if not os.path.exists(file_path):
         st.error(f"Không tìm thấy file dữ liệu cho xe: {car_id}")
@@ -54,14 +64,14 @@ def load_data(car_id):
 
 import glob
 
-csv_files_5 = glob.glob("data/processed/CarFuelHistory_Car*_Features.csv")
+csv_files_5 = glob.glob("data/processed/CarFuelHistory_Processed_*.csv")
 csv_files_5 = [f for f in csv_files_5 if "_CNN1D" not in f]
 
 if not csv_files_5:
-    st.error("Không tìm thấy dữ liệu đã xử lý của 5 xe cũ.")
+    st.error("Không tìm thấy dữ liệu đã xử lý.")
     st.stop()
 
-cars = sorted([os.path.basename(f).replace("CarFuelHistory_", "").replace("_Features.csv", "") for f in csv_files_5])
+cars = sorted([os.path.basename(f).replace("CarFuelHistory_Processed_", "").replace(".csv", "") for f in csv_files_5])
 
 with st.sidebar:
     st.header("⚙️ Cấu hình Dữ liệu")
@@ -113,14 +123,6 @@ with st.sidebar:
     st.header("📏 Chọn Phân Đoạn")
     segment_options = ["Toàn bộ dữ liệu trong khoảng thời gian (All)"] + list(df['SegmentID'].dropna().unique())
     selected_segment = st.selectbox("Hiển thị theo phân đoạn", segment_options)
-    
-    st.markdown("---")
-    st.header("🎛️ Tinh chỉnh Thuật toán")
-    kalman_r = st.slider("Nhiễu đo lường Kalman (R)", min_value=1, max_value=1000, value=9, step=1)
-    
-    st.subheader("🤖 Cấu hình Adaptive Kalman")
-    adapt_threshold = st.slider("Ngưỡng bắt nhảy (Threshold) - Lít", min_value=1.0, max_value=20.0, value=10.0, step=0.5, help="Chênh lệch tối thiểu để bắt đầu nghi ngờ có bơm/rút xăng")
-    adapt_persistence = st.slider("Số nhịp chờ xác nhận (Persistence)", min_value=1, max_value=15, value=3, step=1, help="Số chu kỳ tín hiệu phải duy trì ở mức cao/thấp để xác nhận là đổ/rút thật (lọc đỉnh nhiễu)")
 
 # Filter data
 if selected_segment == "Toàn bộ dữ liệu trong khoảng thời gian (All)":
@@ -132,11 +134,26 @@ else:
 df_seg["_OriginalOrder"] = np.arange(len(df_seg))
 df_seg = df_seg.sort_values(["SegmentID", "FuelTime", "_OriginalOrder"], kind="stable")
 
+# Tính capacity ước lượng từ df_seg để cấu hình tự động
+estimated_capacity = df_seg['FuelLevel'].quantile(0.99)
+if pd.isna(estimated_capacity) or estimated_capacity < 50.0:
+    estimated_capacity = 200.0
+
+with st.sidebar:
+    st.markdown("---")
+    st.header("🎛️ Tinh chỉnh Thuật toán")
+    kalman_r_default = int(max(64.0, (0.04 * estimated_capacity)**2))
+    kalman_r = st.slider("Nhiễu đo lường Kalman (R)", min_value=1, max_value=2000, value=kalman_r_default, step=1)
+    
+    st.subheader("🤖 Cấu hình Adaptive Kalman")
+    adapt_threshold_default = float(max(15.0, 0.075 * estimated_capacity))
+    adapt_threshold = st.slider("Ngưỡng bắt nhảy (Threshold) - Lít", min_value=1.0, max_value=max(100.0, adapt_threshold_default*2), value=adapt_threshold_default, step=0.5, help="Chênh lệch tối thiểu để bắt đầu nghi ngờ có bơm/rút xăng")
+    adapt_persistence = st.slider("Số nhịp chờ xác nhận (Persistence)", min_value=1, max_value=15, value=3, step=1, help="Số chu kỳ tín hiệu phải duy trì ở mức cao/thấp để xác nhận là đổ/rút thật (lọc đỉnh nhiễu)")
+
 # Apply Custom Algorithms
 with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
     df_seg['Custom_Kalman'] = np.nan
     df_seg['Custom_Adaptive_Kalman'] = np.nan
-    df_seg['Custom_CNN1D'] = np.nan
     
     # Tiền xử lý: Tính Gia tốc (Acceleration) nếu chưa có
     if "Acceleration" not in df_seg.columns:
@@ -147,17 +164,27 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         else:
             df_seg["Acceleration"] = 0.0
 
+
+    # --- Tầng 1: Anomaly Detector ---
+    # Quét toàn bộ df_seg trước khi đưa vào vòng lặp Kalman
+    detector = FuelAnomalyDetector(
+        capacity=estimated_capacity, 
+        look_ahead_hours=6.0, 
+        min_low_minutes=30.0,
+        spike_threshold=max(10.0, 0.05 * estimated_capacity)
+    )
+    df_seg = detector.detect_and_clean(df_seg)
+    # --------------------------------
+
     # Chạy trên từng Segment, gán bằng Index để tránh xô lệch dòng
     for seg_id, group in df_seg.groupby('SegmentID', sort=False, dropna=False):
-        fuels = group['FuelLevel'].tolist()
-        
+        fuels = group['CleanedFuel'].tolist()
         kf_std = None
         kf_adapt = None
-        kf_cnn = cnn.BoLocCNN1D()
         
         kalman_std_vals = []
         kalman_adapt_vals = []
-        kalman_cnn_vals = []
+        x_f, P_f, x_p, P_p = [], [], [], []
         
         reference_gap = 5.0
         khoang_thoi_gian_tich_luy_std = 0.0
@@ -172,15 +199,18 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
             movement_state = 0 if str(getattr(dong, "MovementState", "Moving")).strip().upper() == "STOPPED" else 1
             acceleration = float(getattr(dong, "Acceleration", 0.0))
             
-            if not is_valid_measurement(getattr(dong, 'FuelLevel', None), getattr(dong, 'FeatureStatus', '')):
+            if not is_valid_measurement(getattr(dong, 'CleanedFuel', None), getattr(dong, 'FeatureStatus', '')):
                 khoang_thoi_gian_tich_luy_std += gap
                 khoang_thoi_gian_tich_luy_adapt += gap
                 kalman_std_vals.append(np.nan)
-                kalman_adapt_vals.append(np.nan)
-                kalman_cnn_vals.append(np.nan)
+                x_f.append(np.nan)
+                P_f.append(0.0)
+                x_p.append(np.nan)
+                P_p.append(0.0)
                 continue
             
-            measurement = float(dong.FuelLevel)
+            # Tầng 2: Adaptive Kalman đọc tín hiệu đã sạch từ Tầng 1
+            measurement = float(getattr(dong, 'CleanedFuel', dong.FuelLevel))
             
             # Kalman Standard
             khoang_thoi_gian_std = gap + khoang_thoi_gian_tich_luy_std
@@ -197,18 +227,61 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
             khoang_thoi_gian_adapt = gap + khoang_thoi_gian_tich_luy_adapt
             khoang_thoi_gian_tich_luy_adapt = 0.0
             if kf_adapt is None:
-                kf_adapt = BoLocKalmanThichNghi1D(trang_thai_ban_dau=measurement, sai_so_uoc_luong_ban_dau=9.0, nhieu_qua_trinh=1.0, r_co_ban=kalman_r, nguong_bat_nhay=adapt_threshold, nhip_cho_xac_nhan=adapt_persistence)
-                kalman_adapt_vals.append(measurement)
+                kf_adapt = BoLocKalmanThichNghi1D(
+                    trang_thai_ban_dau=measurement, 
+                    sai_so_uoc_luong_ban_dau=4.0, 
+                    nhieu_qua_trinh=1.0, 
+                    r_co_ban=kalman_r, 
+                    r_nhieu_dot_bien=kalman_r * 2.0,
+                    nguong_bat_nhay_co_ban=adapt_threshold, 
+                    nguong_toi_da=max(25.0, 0.125 * estimated_capacity),
+                    nhip_cho_xac_nhan=adapt_persistence,
+                    muc_tieu_thu_100km=estimated_capacity * 0.05
+                )
+                x_f.append(measurement)
+                P_f.append(0.0)
+                x_p.append(measurement)
+                P_p.append(0.0)
             else:
-                kalman_adapt_vals.append(kf_adapt.cap_nhat(measurement, ty_le_dt=khoang_thoi_gian_adapt/reference_gap, trang_thai_chuyen_dong=movement_state, gia_toc=acceleration))
+                # Đọc RollingStd
+                rolling_std_hien_tai = float(getattr(dong, "RollingStd", 0.0))
+                if pd.isna(rolling_std_hien_tai): rolling_std_hien_tai = 0.0
                 
-            # Kalman CNN1D
-            val_cnn = kf_cnn.cap_nhat(measurement)
-            kalman_cnn_vals.append(val_cnn)
+                # Adaptive Kalman Forward Pass
+                x_forward, P_forward, x_predict, P_predict = kf_adapt.cap_nhat(
+                    measurement, 
+                    ty_le_dt=dt_ratio, 
+                    trang_thai_chuyen_dong=movement_state, 
+                    gia_toc=acceleration,
+                    rolling_std=rolling_std_hien_tai,
+                    van_toc=float(getattr(dong, 'Speed', 0.0) or 0.0)
+                )
+                x_f.append(x_forward)
+                P_f.append(P_forward)
+                x_p.append(x_predict)
+                P_p.append(P_predict)
+        
+        # RTS Smoother Backward Pass (Khử 100% độ trễ - Zero Lag)
+        try:
+            from src.core.filters.kalman_adaptive import rts_smooth_1d
+            import numpy as np
             
+            # Chuyển list sang mảng numpy, fill na bằng forward fill tạm thời
+            x_f_arr = pd.Series(x_f).ffill().bfill().values
+            P_f_arr = pd.Series(P_f).ffill().bfill().values
+            x_p_arr = pd.Series(x_p).ffill().bfill().values
+            P_p_arr = pd.Series(P_p).ffill().bfill().values
+            
+            kalman_adapt_vals = rts_smooth_1d(x_f_arr, P_f_arr, x_p_arr, P_p_arr)
+        except Exception as e:
+            print("RTS Error:", e)
+            kalman_adapt_vals = x_f # Fallback
+        
         df_seg.loc[group.index, 'Custom_Kalman'] = kalman_std_vals
         df_seg.loc[group.index, 'Custom_Adaptive_Kalman'] = kalman_adapt_vals
-        df_seg.loc[group.index, 'Custom_CNN1D'] = kalman_cnn_vals
+        
+        # Run GRU cho toàn bộ segment một cách nhanh chóng
+        df_seg.loc[group.index, 'Time_Aware_GRU'] = run_gru(group, gru_model, N=30)
 
 # Restore original order just in case
 df_seg = df_seg.sort_values("_OriginalOrder", kind="stable").drop(columns="_OriginalOrder")
@@ -249,10 +322,10 @@ for seg_id, group in df_seg.groupby('SegmentID', sort=False):
                              mode='lines', name=f'Adaptive Kalman (Dynamic R)', legendgroup='adapt', showlegend=show_legend,
                              line=dict(color='blue', width=2, dash='dash'), connectgaps=True), row=1, col=1, secondary_y=False)
                              
-    # CNN 1D
-    fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Custom_CNN1D'], 
-                             mode='lines', name=f'CNN 1D (AI)', legendgroup='cnn', showlegend=show_legend,
-                             line=dict(color='#FFD700', width=3), connectgaps=True), row=1, col=1, secondary_y=False)
+    # Time-aware GRU
+    fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Time_Aware_GRU'], 
+                             mode='lines', name=f'Time-aware GRU (Model D)', legendgroup='gru', showlegend=show_legend,
+                             line=dict(color='orange', width=2), connectgaps=True), row=1, col=1, secondary_y=False)
                              
     show_legend = False
 

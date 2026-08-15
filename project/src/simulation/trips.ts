@@ -50,6 +50,22 @@ export const VEHICLES: Vehicle[] = [
     ]
   },
   {
+    id: "21H-02058",
+    name: "Xe 21H-02058",
+    trips: [
+      {
+        id: "21H-02058",
+        vehicleId: "21H-02058",
+        vehicleName: "Xe 21H-02058",
+        tripName: "Dữ liệu thực tế",
+        noiseLabel: "Real Data",
+        noiseKind: "spiky",
+        durationSec: 894000,
+        startTimeStr: "2026-07-29T00:00:00Z",
+      }
+    ]
+  },
+  {
     id: "21H-03221",
     name: "Xe 21H-03221",
     trips: [

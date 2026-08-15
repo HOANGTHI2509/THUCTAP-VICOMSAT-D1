@@ -25,7 +25,7 @@ export function useSimulation(trip: Trip | null): SimulationState & {
   reset: () => void;
 } {
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeedState] = useState(100); // Tốc độ x100 vì dữ liệu rất dài
+  const [speed, setSpeedState] = useState(2); // Tốc độ mặc định x2
   const [cursor, setCursor] = useState(0);
   const [current, setCurrent] = useState<TripPoint | null>(null);
   const [windowPoints, setWindowPoints] = useState<TripPoint[]>([]);
