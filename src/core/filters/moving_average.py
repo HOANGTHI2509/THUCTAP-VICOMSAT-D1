@@ -46,6 +46,34 @@ def tinh_loc_trung_binh_dong(du_lieu: list[float], kich_thuoc_cua_so: int) -> li
 
     return ket_qua
 
+def tinh_loc_trung_vi_dong(du_lieu: list[float], kich_thuoc_cua_so: int) -> list[float]:
+    """
+    Median Filter dạng causal/trailing window (Triển khai luồng thời gian thực).
+    Khi gặp giá trị không hợp lệ, cửa sổ được reset để tránh nối dữ liệu.
+    Rất hiệu quả trong việc loại bỏ nhiễu đột biến (outliers) 1-2 nhịp.
+    """
+    if kich_thuoc_cua_so <= 0:
+        raise ValueError("kich_thuoc_cua_so phải lớn hơn 0.")
+
+    ket_qua: list[float] = []
+    cua_so: deque[float] = deque(maxlen=kich_thuoc_cua_so)
+
+    for gia_tri in du_lieu:
+        gia_tri = pd.to_numeric(gia_tri, errors="coerce")
+
+        if pd.isna(gia_tri) or gia_tri <= 0:
+            ket_qua.append(np.nan)
+            cua_so.clear()
+            continue
+
+        cua_so.append(float(gia_tri))
+        
+        # Tính trung vị (Median)
+        trung_vi_hien_tai = np.median(cua_so)
+        ket_qua.append(trung_vi_hien_tai)
+
+    return ket_qua
+
 def chay_trung_binh_dong_cho_tat_ca_xe(mau_ten_file: str = "CarFuelHistory_Processed_*.csv", kich_thuoc_cua_so: int = 10) -> None:
     print("=== BẮT ĐẦU CHẠY MOVING AVERAGE (CHUYÊN GIA) ===")
     danh_sach_file = sorted(glob.glob(mau_ten_file))

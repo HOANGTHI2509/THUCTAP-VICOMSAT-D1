@@ -12,8 +12,16 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
 # Custom Imports
-from src.core.filters import kalman_traditional as kalman, kalman_adaptive
-from src.core.filters.kalman_adaptive import BoLocKalmanThichNghi1D, is_valid_measurement
+from src.core.filters import kalman_traditional as kalman
+import importlib.util
+spec = importlib.util.spec_from_file_location("kalman_adaptive_copy", "src/core/filters/kalman_adaptive copy.py")
+kalman_adaptive = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = kalman_adaptive
+spec.loader.exec_module(kalman_adaptive)
+BoLocKalmanThichNghi1D = kalman_adaptive.BoLocKalmanThichNghi1D
+is_valid_measurement = kalman_adaptive.is_valid_measurement
+estimate_vehicle_profile = kalman_adaptive.estimate_vehicle_profile
+classify_signal_modes = kalman_adaptive.classify_signal_modes
 from src.core.filters.anomaly_detector import FuelAnomalyDetector
 import torch
 from src.models.time_aware_gru import FuelTimeAwareGRU
@@ -46,7 +54,48 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🔬 Đấu Trường Thuật Toán: Lọc Nhiễu Nhiên Liệu")
-st.markdown("**Trực quan hóa và so sánh hiệu năng 3 thuật toán: Moving Average, Median Filter và Standard Kalman Filter**")
+st.markdown("**Trực quan hóa và so sánh hiệu năng của các thuật toán: Raw, Kalman, và CNN-GA**")
+
+with st.expander("🏆 PERFORMANCE MATRIX / METRIC HEATMAP", expanded=False):
+    st.markdown("Đánh giá định lượng toàn diện trên **Synthetic Test Set** (15 segments, 4500 samples chưa từng được huấn luyện).")
+    try:
+        import plotly.figure_factory as ff
+        df_bench = pd.read_csv('artifacts/benchmark_summary.csv')
+        models_str = [m.replace('1D-CNN + Gated Attention', 'CNN-GA').replace('Standard Kalman', 'Standard').replace('Adaptive Kalman', 'Adaptive') for m in df_bench['Model'].values]
+        metrics_info = {
+            'RMSE (L) ↓': -1, 'SNR (dB) ↑': 1, 'Smoothness (L/step)': -1,
+            'Refuel F1 ↑': 1, 'Theft F1 ↑': 1, 'Delay (steps) ↓': -1, 'Latency (ms) ↓': -1
+        }
+        
+        matrix = []
+        labels_text = []
+        for metric, direction in metrics_info.items():
+            vals = pd.to_numeric(df_bench[metric].astype(str).str.replace('~', ''), errors='coerce').fillna(0).values
+            v_min, v_max = np.min(vals), np.max(vals)
+            norm = np.ones_like(vals) if v_max == v_min else ((vals - v_min) / (v_max - v_min) if direction == 1 else (v_max - vals) / (v_max - v_min))
+            matrix.append(norm)
+            fmt_labels = [f"{val:.3f}" if 0 < val < 0.01 else (f"{val:.2f}" if val != 0 else "0.0") for val in vals]
+            labels_text.append(fmt_labels)
+            
+        y_labels = [m.replace(' (L)', '').replace(' (dB)', '').replace(' (L/step)', '').replace(' (steps)', '').replace(' (ms)', '') for m in metrics_info.keys()]
+        
+        fig_heat = ff.create_annotated_heatmap(
+            z=matrix,
+            x=models_str,
+            y=y_labels,
+            annotation_text=labels_text,
+            colorscale='RdYlGn',
+            showscale=False
+        )
+        fig_heat.update_layout(height=450, margin=dict(t=50, l=100, r=20, b=20), font=dict(size=14))
+        # Add colorbar manually since create_annotated_heatmap hides it by default
+        fig_heat['data'][0]['showscale'] = True
+        fig_heat['data'][0]['colorbar'] = dict(title='Scale (0-1)')
+        
+        st.plotly_chart(fig_heat, use_container_width=True)
+        st.markdown("*Lưu ý: 🟩 Xanh = Tốt nhất, 🟥 Đỏ = Kém nhất. Mỗi hàng được chuẩn hóa độc lập theo thang Min-Max.*")
+    except Exception as e:
+        st.warning(f"Chưa tìm thấy dữ liệu Benchmark. Vui lòng chạy script `benchmark_cnn.py` trước. Lỗi: {e}")
 
 @st.cache_data
 def load_data(car_id):
@@ -60,12 +109,23 @@ def load_data(car_id):
     df['FuelTime'] = pd.to_datetime(df['FuelTime'], errors="coerce")
     df['FuelLevel'] = pd.to_numeric(df['FuelLevel'], errors="coerce")
     df['SegmentID'] = pd.to_numeric(df['SegmentID'], errors="coerce")
+    
+    # Tự động nạp thêm cột CNN_Realtime và CNN_EMA nếu file tồn tại
+    cnn_file_path = file_path.replace(".csv", "_CNN_Realtime.csv")
+    if os.path.exists(cnn_file_path):
+        df_cnn = pd.read_csv(cnn_file_path)
+        if 'CNN_Realtime' in df_cnn.columns:
+            df['CNN_Realtime'] = df_cnn['CNN_Realtime']
+        if 'CNN_EMA' in df_cnn.columns:
+            df['CNN_EMA'] = df_cnn['CNN_EMA']
+            
     return df
 
 import glob
 
 csv_files_5 = glob.glob("data/processed/CarFuelHistory_Processed_*.csv")
-csv_files_5 = [f for f in csv_files_5 if "_CNN1D" not in f]
+# Ẩn bớt các file sinh ra từ script dự đoán để Dropdown không bị rối
+csv_files_5 = [f for f in csv_files_5 if "_CNN1D" not in f and "_CNN_Realtime" not in f and "_Kalman_Adaptive" not in f]
 
 if not csv_files_5:
     st.error("Không tìm thấy dữ liệu đã xử lý.")
@@ -78,6 +138,7 @@ with st.sidebar:
     selected_car = st.selectbox("🚗 Chọn Xe (Vehicle ID)", cars)
     
 df = load_data(selected_car)
+vehicle_profile = estimate_vehicle_profile(df, selected_car)
 
 min_date = df['FuelTime'].min().date()
 max_date = df['FuelTime'].max().date()
@@ -135,7 +196,9 @@ df_seg["_OriginalOrder"] = np.arange(len(df_seg))
 df_seg = df_seg.sort_values(["SegmentID", "FuelTime", "_OriginalOrder"], kind="stable")
 
 # Tính capacity ước lượng từ df_seg để cấu hình tự động
-estimated_capacity = df_seg['FuelLevel'].quantile(0.99)
+estimated_capacity = vehicle_profile.capacity_est
+if pd.isna(estimated_capacity) or estimated_capacity < 50.0:
+    estimated_capacity = df_seg['FuelLevel'].quantile(0.99)
 if pd.isna(estimated_capacity) or estimated_capacity < 50.0:
     estimated_capacity = 200.0
 
@@ -173,12 +236,31 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         min_low_minutes=30.0,
         spike_threshold=max(10.0, 0.05 * estimated_capacity)
     )
-    df_seg = detector.detect_and_clean(df_seg)
+    df_seg = (
+        df_seg.groupby("SegmentID", sort=False, dropna=False, group_keys=False)
+        .apply(detector.detect_and_clean)
+    )
+    df_seg = (
+        df_seg.groupby("SegmentID", sort=False, dropna=False, group_keys=False)
+        .apply(
+            lambda group: classify_signal_modes(
+                group,
+                vehicle_profile,
+                source_col="CleanedFuel",
+                output_col="ProfileCleanFuel",
+                mode_col="SignalMode",
+                lookback=7,
+                lookahead=5,
+            )
+        )
+    )
     # --------------------------------
 
     # Chạy trên từng Segment, gán bằng Index để tránh xô lệch dòng
     for seg_id, group in df_seg.groupby('SegmentID', sort=False, dropna=False):
-        fuels = group['CleanedFuel'].tolist()
+        adaptive_source_col = "ProfileCleanFuel" if "ProfileCleanFuel" in group.columns else "CleanedFuel"
+        fuels = group[adaptive_source_col].tolist()
+        group_rolling_std = group[adaptive_source_col].rolling(window=12, min_periods=1).std().fillna(0.0).tolist()
         kf_std = None
         kf_adapt = None
         
@@ -199,7 +281,7 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
             movement_state = 0 if str(getattr(dong, "MovementState", "Moving")).strip().upper() == "STOPPED" else 1
             acceleration = float(getattr(dong, "Acceleration", 0.0))
             
-            if not is_valid_measurement(getattr(dong, 'CleanedFuel', None), getattr(dong, 'FeatureStatus', '')):
+            if not is_valid_measurement(getattr(dong, adaptive_source_col, None), getattr(dong, 'FeatureStatus', '')):
                 khoang_thoi_gian_tich_luy_std += gap
                 khoang_thoi_gian_tich_luy_adapt += gap
                 kalman_std_vals.append(np.nan)
@@ -210,7 +292,7 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
                 continue
             
             # Tầng 2: Adaptive Kalman đọc tín hiệu đã sạch từ Tầng 1
-            measurement = float(getattr(dong, 'CleanedFuel', dong.FuelLevel))
+            measurement = float(getattr(dong, adaptive_source_col, dong.FuelLevel))
             
             # Kalman Standard
             khoang_thoi_gian_std = gap + khoang_thoi_gian_tich_luy_std
@@ -229,53 +311,35 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
             if kf_adapt is None:
                 kf_adapt = BoLocKalmanThichNghi1D(
                     trang_thai_ban_dau=measurement, 
+                    capacity=estimated_capacity,
                     sai_so_uoc_luong_ban_dau=4.0, 
-                    nhieu_qua_trinh=1.0, 
-                    r_co_ban=kalman_r, 
-                    r_nhieu_dot_bien=kalman_r * 2.0,
-                    nguong_bat_nhay_co_ban=adapt_threshold, 
-                    nguong_toi_da=max(25.0, 0.125 * estimated_capacity),
+                    nhieu_qua_trinh=0.25,
+                    r_co_ban=max(
+                        25.0,
+                        vehicle_profile.noise_sigma_liters ** 2,
+                        vehicle_profile.flat_jitter_threshold ** 2,
+                        (0.015 * vehicle_profile.capacity_est) ** 2,
+                    ),
                     nhip_cho_xac_nhan=adapt_persistence,
-                    muc_tieu_thu_100km=estimated_capacity * 0.05
+                    nguong_bat_nhay=adapt_threshold,
+                    nguong_bat_nhay_co_ban=vehicle_profile.spike_threshold,
+                    nguong_toi_da=max(adapt_threshold * 2.0, vehicle_profile.event_threshold * 2.0)
                 )
                 x_f.append(measurement)
-                P_f.append(0.0)
-                x_p.append(measurement)
-                P_p.append(0.0)
             else:
-                # Đọc RollingStd
-                rolling_std_hien_tai = float(getattr(dong, "RollingStd", 0.0))
-                if pd.isna(rolling_std_hien_tai): rolling_std_hien_tai = 0.0
-                
-                # Adaptive Kalman Forward Pass
-                x_forward, P_forward, x_predict, P_predict = kf_adapt.cap_nhat(
+                # Adaptive Kalman Forward Pass (No RTS Smoother for realtime)
+                x_forward = kf_adapt.cap_nhat(
                     measurement, 
                     ty_le_dt=dt_ratio, 
                     trang_thai_chuyen_dong=movement_state, 
                     gia_toc=acceleration,
-                    rolling_std=rolling_std_hien_tai,
-                    van_toc=float(getattr(dong, 'Speed', 0.0) or 0.0)
+                    rolling_std=float(group_rolling_std[i_loc]),
+                    van_toc=float(getattr(dong, 'Speed', 0.0) or 0.0),
+                    signal_mode=str(getattr(dong, 'SignalMode', 'NORMAL'))
                 )
                 x_f.append(x_forward)
-                P_f.append(P_forward)
-                x_p.append(x_predict)
-                P_p.append(P_predict)
         
-        # RTS Smoother Backward Pass (Khử 100% độ trễ - Zero Lag)
-        try:
-            from src.core.filters.kalman_adaptive import rts_smooth_1d
-            import numpy as np
-            
-            # Chuyển list sang mảng numpy, fill na bằng forward fill tạm thời
-            x_f_arr = pd.Series(x_f).ffill().bfill().values
-            P_f_arr = pd.Series(P_f).ffill().bfill().values
-            x_p_arr = pd.Series(x_p).ffill().bfill().values
-            P_p_arr = pd.Series(P_p).ffill().bfill().values
-            
-            kalman_adapt_vals = rts_smooth_1d(x_f_arr, P_f_arr, x_p_arr, P_p_arr)
-        except Exception as e:
-            print("RTS Error:", e)
-            kalman_adapt_vals = x_f # Fallback
+        kalman_adapt_vals = x_f
         
         df_seg.loc[group.index, 'Custom_Kalman'] = kalman_std_vals
         df_seg.loc[group.index, 'Custom_Adaptive_Kalman'] = kalman_adapt_vals
@@ -315,17 +379,44 @@ for seg_id, group in df_seg.groupby('SegmentID', sort=False):
     # Kalman Standard
     fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Custom_Kalman'], 
                              mode='lines', name=f'Kalman Filter (R={kalman_r})', legendgroup='kalman', showlegend=show_legend,
-                             line=dict(color='#00CC96', width=2), connectgaps=True), row=1, col=1, secondary_y=False)
+                             line=dict(color='#00CC96', width=2), connectgaps=True, visible='legendonly'), row=1, col=1, secondary_y=False)
+
+    if 'ProfileCleanFuel' in group.columns:
+        fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['ProfileCleanFuel'],
+                                 mode='lines', name='Profile-clean Fuel', legendgroup='profile_clean', showlegend=show_legend,
+                                 line=dict(color='#444444', width=1.5, dash='dot'), connectgaps=True, visible='legendonly'), row=1, col=1, secondary_y=False)
+
+    if 'SignalMode' in group.columns:
+        signal_points = group[group['SignalMode'].isin(['SPIKE_UP', 'SPIKE_DOWN', 'REFUEL', 'DROP_EVENT', 'TREND_DOWN'])]
+        if not signal_points.empty:
+            fig.add_trace(go.Scatter(x=signal_points['FuelTime'], y=signal_points['FuelLevel'],
+                                     mode='markers', name='SignalMode markers', legendgroup='signal_mode', showlegend=show_legend,
+                                     text=signal_points['SignalMode'],
+                                     marker=dict(size=7, color='black', symbol='circle-open'),
+                                     visible='legendonly'), row=1, col=1, secondary_y=False)
                              
-    # Kalman Adaptive
+    # Kalman Adaptive (Mặc định hiển thị)
     fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Custom_Adaptive_Kalman'], 
                              mode='lines', name=f'Adaptive Kalman (Dynamic R)', legendgroup='adapt', showlegend=show_legend,
                              line=dict(color='blue', width=2, dash='dash'), connectgaps=True), row=1, col=1, secondary_y=False)
                              
     # Time-aware GRU
-    fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Time_Aware_GRU'], 
-                             mode='lines', name=f'Time-aware GRU (Model D)', legendgroup='gru', showlegend=show_legend,
-                             line=dict(color='orange', width=2), connectgaps=True), row=1, col=1, secondary_y=False)
+    if 'Time_Aware_GRU' in group.columns:
+        fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Time_Aware_GRU'], 
+                                 mode='lines', name=f'Time-aware GRU (Model D)', legendgroup='gru', showlegend=show_legend,
+                                 line=dict(color='orange', width=2), connectgaps=True, visible='legendonly'), row=1, col=1, secondary_y=False)
+                             
+    # 1D-CNN + Gated Attention
+    if 'CNN_Realtime' in group.columns:
+        fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['CNN_Realtime'], 
+                                 mode='lines', name=f'1D-CNN + Gated Attention (Realtime)', legendgroup='cnn', showlegend=show_legend,
+                                 line=dict(color='purple', width=2.5), connectgaps=True, visible='legendonly'), row=1, col=1, secondary_y=False)
+                                 
+    # 1D-CNN + Causal EMA 0.4
+    if 'CNN_EMA' in group.columns:
+        fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['CNN_EMA'], 
+                                 mode='lines', name=f'CNN-GA + Causal EMA 0.4', legendgroup='cnn_ema', showlegend=show_legend,
+                                 line=dict(color='magenta', width=3), connectgaps=True), row=1, col=1, secondary_y=False)
                              
     show_legend = False
 
