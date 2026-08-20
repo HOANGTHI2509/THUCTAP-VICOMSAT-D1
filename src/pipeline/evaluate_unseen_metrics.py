@@ -8,11 +8,10 @@ import matplotlib.pyplot as plt
 from scipy import stats
 from tqdm import tqdm
 
-from src.models.time_aware_gru import FuelTimeAwareGRU
 from src.core.filters.kalman_traditional import BoLocKalmanTieuChuan1D
 from src.core.filters.kalman_adaptive import BoLocKalmanThichNghi1D
 from src.pipeline.build_gru_dataset import process_timegap
-from src.pipeline.evaluate_real_vcomsat import run_kalman, run_gru
+from src.pipeline.evaluate_real_vcomsat import run_kalman
 
 def get_local_trend(raw_series, window=15):
     """Tính Local Trend bằng cách sử dụng rolling median để bỏ qua các spike/sloshing ngắn hạn."""
@@ -179,9 +178,9 @@ def plot_zooms(df, raw, preds_dict, events, vehicle_id):
     if events['Refuel']: cases['Refuel'] = (max(0, events['Refuel'][0][0] - 15), min(len(raw), events['Refuel'][0][1] + 15))
     if events['Drain']: cases['Drain'] = (max(0, events['Drain'][0][0] - 15), min(len(raw), events['Drain'][0][1] + 15))
     
-    colors = {'Raw': 'black', 'Standard Kalman': 'blue', 'Adaptive Kalman': 'orange', 'Time-aware GRU (N=30)': 'red'}
-    alphas = {'Raw': 0.3, 'Standard Kalman': 0.6, 'Adaptive Kalman': 0.8, 'Time-aware GRU (N=30)': 0.9}
-    markers = {'Raw': '.', 'Standard Kalman': '', 'Adaptive Kalman': '', 'Time-aware GRU (N=30)': ''}
+    colors = {'Raw': 'black', 'Standard Kalman': 'blue', 'Adaptive Kalman': 'orange', }
+    alphas = {'Raw': 0.3, 'Standard Kalman': 0.6, 'Adaptive Kalman': 0.8}
+    markers = {'Raw': '.', 'Standard Kalman': '', 'Adaptive Kalman': ''}
     
     for name, span in cases.items():
         if not span: continue
@@ -210,13 +209,6 @@ def main():
     # Exclude Car1 to Car5 (Seen)
     seen_cars = ['Car1.csv', 'Car2.csv', 'Car3.csv', 'Car4.csv', 'Car5.csv']
     unseen_files = [f for f in all_files if not any(sc in f for sc in seen_cars)]
-    
-    # Load GRU Final Model (which is Model D)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    gru_model = FuelTimeAwareGRU(input_dim=6, hidden_dim=64).to(device)
-    gru_model.load_state_dict(torch.load('models/gru/best_gru_final.pth', map_location=device))
-    gru_model.eval()
-
     all_results = []
     
     for file in tqdm(unseen_files, desc="Đánh giá Unseen"):
@@ -240,14 +232,7 @@ def main():
             'Raw': raw_fuel,
             'Standard Kalman': std_kalman,
             'Adaptive Kalman': adp_kalman,
-        }
-        
-        # Predict GRU Final
-        t0 = time.time()
-        gru_preds = run_gru(df, gru_model, N=30)
-        gru_lat = (time.time() - t0) / max(1, len(df)) * 1000
-        preds_dict['Time-aware GRU Final'] = gru_preds
-            
+        }            
         metrics = calculate_metrics(raw_fuel, preds_dict, events, local_trend)
         
         for m_name, m_vals in metrics.items():
@@ -256,7 +241,7 @@ def main():
             if m_name == 'Raw': m_vals['Latency'] = 0.0
             elif 'Standard' in m_name: m_vals['Latency'] = std_lat
             elif 'Adaptive' in m_name: m_vals['Latency'] = adp_lat
-            else: m_vals['Latency'] = gru_lat
+            pass
             
             all_results.append(m_vals)
             
@@ -270,7 +255,7 @@ def main():
     
     # 2. Báo cáo Thống kê
     summary = []
-    model_names = ['Raw', 'Standard Kalman', 'Adaptive Kalman', 'Time-aware GRU Final']
+    model_names = ['Raw', 'Standard Kalman', 'Adaptive Kalman']
     
     for model in model_names:
         m_df = res_df[res_df['Model'] == model]

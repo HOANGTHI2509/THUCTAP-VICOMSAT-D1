@@ -16,7 +16,7 @@ const DEFAULT_ZOOM = 2;
 
 export default function RollingChart({ trip, points, cursor, windowSec, playing }: Props) {
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
-  const [showML, setShowML] = useState(false);
+  const [showAdaptive, setShowAdaptive] = useState(false);
   
   const [hoverMouse, setHoverMouse] = useState<{ x: number, y: number } | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -91,14 +91,16 @@ export default function RollingChart({ trip, points, cursor, windowSec, playing 
               <span className="text-cockpit-400">Xăng gốc:</span>
               <span className="font-mono font-semibold text-fuel-raw">{hoverData.point.rawFuel.toFixed(1)} L</span>
             </div>
-            <div className="flex justify-between gap-4">
-              <span className="text-cockpit-400">Adaptive K.:</span>
-              <span className="font-mono font-semibold text-fuel-filter">{hoverData.point.adaptiveKalman.toFixed(1)} L</span>
-            </div>
-            {showML && hoverData.point.mlKalman !== undefined && (
+            {hoverData.point.mlKalman !== undefined && (
               <div className="flex justify-between gap-4">
-                <span className="text-cockpit-400">Time-aware GRU:</span>
+                <span className="text-cockpit-400">Random Forest:</span>
                 <span className="font-mono font-semibold text-blue-400">{hoverData.point.mlKalman.toFixed(1)} L</span>
+              </div>
+            )}
+            {showAdaptive && (
+              <div className="flex justify-between gap-4">
+                <span className="text-cockpit-400">Adaptive K.:</span>
+                <span className="font-mono font-semibold text-fuel-filter">{hoverData.point.adaptiveKalman.toFixed(1)} L</span>
               </div>
             )}
           </div>
@@ -113,17 +115,17 @@ export default function RollingChart({ trip, points, cursor, windowSec, playing 
           </div>
           <div className="flex items-center gap-4 text-[11px] ml-2 border-l border-cockpit-700 pl-4">
             <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-fuel-raw" /><span className="text-cockpit-300">Xăng gốc</span></span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-fuel-filter" /><span className="text-cockpit-300">Adaptive Kalman</span></span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-blue-500" /><span className="text-[10px] uppercase tracking-widest text-cockpit-400">Random Forest Classifier</span></span>
             <label className="flex items-center gap-1.5 cursor-pointer hover:bg-cockpit-700 px-2 py-1 rounded transition-colors">
               <input 
                 type="checkbox" 
-                checked={showML} 
-                onChange={(e) => setShowML(e.target.checked)}
-                className="accent-blue-500 rounded cursor-pointer"
+                checked={showAdaptive} 
+                onChange={(e) => setShowAdaptive(e.target.checked)}
+                className="accent-fuel-filter rounded cursor-pointer"
               />
               <span className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-blue-500" />
-                <span className="text-[10px] uppercase tracking-widest text-cockpit-400">Time-aware GRU</span>
+                <span className="w-3 h-0.5 bg-fuel-filter" />
+                <span className="text-[10px] uppercase tracking-widest text-cockpit-400">Adaptive Kalman</span>
               </span>
             </label>
           </div>
@@ -142,12 +144,12 @@ export default function RollingChart({ trip, points, cursor, windowSec, playing 
           ))}
         </div>
       </div>
-      <ChartPanel mode="fuel" points={points} cursor={cursor} windowSec={windowSec} playing={playing} zoom={zoom} trip={trip} showML={showML} />
+      <ChartPanel mode="fuel" points={points} cursor={cursor} windowSec={windowSec} playing={playing} zoom={zoom} trip={trip} showAdaptive={showAdaptive} />
     </div>
   );
 }
 
-function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, showML = false }: {
+function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, showAdaptive = false }: {
   mode: ChartMode;
   points: TripPoint[];
   cursor: number;
@@ -155,7 +157,7 @@ function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, 
   playing: boolean;
   zoom?: number;
   trip: Trip;
-  showML?: boolean;
+  showAdaptive?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -175,12 +177,12 @@ function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, 
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      draw(ctx, width, height, points, cursor, windowSec, mode, zoom, trip, showML);
+      draw(ctx, width, height, points, cursor, windowSec, mode, zoom, trip, showAdaptive);
     };
     render();
     window.addEventListener("resize", render);
     return () => window.removeEventListener("resize", render);
-  }, [points, cursor, windowSec, mode, zoom, playing, showML]);
+  }, [points, cursor, windowSec, mode, zoom, playing, showAdaptive]);
 
   return (
     <div ref={containerRef} className={`relative w-full ${mode === "speed" ? "h-[160px]" : "h-[240px]"} shrink-0`}>
@@ -192,7 +194,7 @@ function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, 
   );
 }
 
-function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripPoint[], cursor: number, windowSec: number, mode: ChartMode, zoom: number, trip: Trip, showML: boolean = false) {
+function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripPoint[], cursor: number, windowSec: number, mode: ChartMode, zoom: number, trip: Trip, showAdaptive: boolean = false) {
   const padL = 52;
   const padR = 14;
   const padT = 14;
@@ -217,8 +219,9 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
   ctx.lineWidth = 1;
 
   const allVisibleValues = visible.flatMap((point) => {
-    const vals = [point.adaptiveKalman, point.rawFuel];
-    if (showML && point.mlKalman !== undefined) vals.push(point.mlKalman);
+    const vals = [point.rawFuel];
+    if (showAdaptive) vals.push(point.adaptiveKalman);
+    if (point.mlKalman !== undefined) vals.push(point.mlKalman);
     return vals;
   });
   const minVisible = allVisibleValues.length ? Math.min(...allVisibleValues) : 0;
@@ -280,10 +283,12 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
     }
     drawLine(ctx, visible, (point) => yOf(point.rawFuel), xOf, withAlpha(rawHex, 0.35), 1, 0);
     drawLine(ctx, visible, (point) => yOf(point.rawFuel), xOf, rawHex, 1.6, 6);
-    if (showML) {
-      drawLine(ctx, visible, (point) => yOf(point.mlKalman !== undefined ? point.mlKalman : point.adaptiveKalman), xOf, "#3b82f6", 2.4, 6); // blue-500
+    
+    drawLine(ctx, visible, (point) => yOf(point.mlKalman !== undefined ? point.mlKalman : point.adaptiveKalman), xOf, "#3b82f6", 2.4, 6); // blue-500
+    
+    if (showAdaptive) {
+      drawLine(ctx, visible, (point) => yOf(point.adaptiveKalman), xOf, filterHex, 2.4, 8);
     }
-    drawLine(ctx, visible, (point) => yOf(point.adaptiveKalman), xOf, filterHex, 2.4, 8);
   } else {
     drawLine(ctx, visible, (point) => yOf(point.speed), xOf, speedHex, 2.4, 6);
   }

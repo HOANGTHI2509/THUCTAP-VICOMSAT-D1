@@ -13,29 +13,42 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 
 # Custom Imports
 from src.core.filters import kalman_traditional as kalman
-import importlib.util
-spec = importlib.util.spec_from_file_location("kalman_adaptive_copy", "src/core/filters/kalman_adaptive copy.py")
-kalman_adaptive = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = kalman_adaptive
-spec.loader.exec_module(kalman_adaptive)
-BoLocKalmanThichNghi1D = kalman_adaptive.BoLocKalmanThichNghi1D
-is_valid_measurement = kalman_adaptive.is_valid_measurement
-estimate_vehicle_profile = kalman_adaptive.estimate_vehicle_profile
-classify_signal_modes = kalman_adaptive.classify_signal_modes
+from src.core.filters.kalman_adaptive import (
+    BoLocKalmanThichNghi1D,
+    is_valid_measurement
+)
+
+def classify_signal_modes(
+    group,
+    vehicle_profile=None,
+    source_col="FuelLevel",
+    output_col="ProfileCleanFuel",
+    mode_col="SignalMode",
+    **_,
+):
+    group = group.copy()
+    group[output_col] = group[source_col]
+    group[mode_col] = "NORMAL"
+    return group
+
+def estimate_vehicle_profile(df, car_id=None):
+    fuel = pd.to_numeric(df.get("FuelLevel"), errors="coerce")
+    fuel = fuel[(fuel > 0) & fuel.notna()]
+    capacity = float(fuel.quantile(0.995)) if not fuel.empty else 200.0
+    if pd.isna(capacity) or capacity < 50.0:
+        capacity = 200.0
+    return type(
+        "VehicleProfile",
+        (),
+        {
+            "capacity_est": capacity,
+            "noise_sigma_liters": max(0.5, 0.002 * capacity),
+            "flat_jitter_threshold": max(0.8, 0.003 * capacity),
+            "spike_threshold": max(3.0, 0.012 * capacity),
+            "event_threshold": max(6.0, 0.035 * capacity),
+        },
+    )()
 from src.core.filters.anomaly_detector import FuelAnomalyDetector
-import torch
-from src.models.time_aware_gru import FuelTimeAwareGRU
-from src.pipeline.evaluate_real_vcomsat import run_gru
-
-@st.cache_resource
-def load_gru_model():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = FuelTimeAwareGRU(input_dim=6, hidden_dim=64).to(device)
-    model.load_state_dict(torch.load('models/gru/best_gru_final.pth', map_location=device))
-    model.eval()
-    return model
-
-gru_model = load_gru_model()
 
 try:
     from src.utils.calculate_metrics import calculate_metrics
@@ -236,10 +249,16 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         min_low_minutes=30.0,
         spike_threshold=max(10.0, 0.05 * estimated_capacity)
     )
+    # Preserve SegmentID in case pandas groupby.apply drops it
+    original_segments = df_seg["SegmentID"].copy()
+
     df_seg = (
         df_seg.groupby("SegmentID", sort=False, dropna=False, group_keys=False)
         .apply(detector.detect_and_clean)
     )
+    if "SegmentID" not in df_seg.columns:
+        df_seg["SegmentID"] = original_segments
+
     df_seg = (
         df_seg.groupby("SegmentID", sort=False, dropna=False, group_keys=False)
         .apply(
@@ -254,6 +273,8 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
             )
         )
     )
+    if "SegmentID" not in df_seg.columns:
+        df_seg["SegmentID"] = original_segments
     # --------------------------------
 
     # Chạy trên từng Segment, gán bằng Index để tránh xô lệch dòng
@@ -320,10 +341,7 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
                         vehicle_profile.flat_jitter_threshold ** 2,
                         (0.015 * vehicle_profile.capacity_est) ** 2,
                     ),
-                    nhip_cho_xac_nhan=adapt_persistence,
-                    nguong_bat_nhay=adapt_threshold,
-                    nguong_bat_nhay_co_ban=vehicle_profile.spike_threshold,
-                    nguong_toi_da=max(adapt_threshold * 2.0, vehicle_profile.event_threshold * 2.0)
+                    nhip_cho_xac_nhan=adapt_persistence
                 )
                 x_f.append(measurement)
             else:
@@ -343,9 +361,6 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         
         df_seg.loc[group.index, 'Custom_Kalman'] = kalman_std_vals
         df_seg.loc[group.index, 'Custom_Adaptive_Kalman'] = kalman_adapt_vals
-        
-        # Run GRU cho toàn bộ segment một cách nhanh chóng
-        df_seg.loc[group.index, 'Time_Aware_GRU'] = run_gru(group, gru_model, N=30)
 
 # Restore original order just in case
 df_seg = df_seg.sort_values("_OriginalOrder", kind="stable").drop(columns="_OriginalOrder")

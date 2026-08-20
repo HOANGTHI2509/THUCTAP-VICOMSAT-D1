@@ -231,7 +231,7 @@ def build_ai_enhanced_kalman(group: pd.DataFrame) -> list[float]:
                 noise_anchor = float(output) if not pd.isna(output) else float(b)
                 noise_dir = 0
                 noise_dir_count = 0
-            noise_hold = 6
+            noise_hold = 3  # Giảm thời gian hold từ 6 xuống 3 để nhạy hơn khi hết nhiễu
         else:
             noise_hold = max(0, noise_hold - 1)
             if noise_hold == 0:
@@ -297,16 +297,28 @@ def build_ai_enhanced_kalman(group: pd.DataFrame) -> list[float]:
             alpha = 0.035
             pending_drain = None
         elif state == "STABLE_JITTER":
+            refuel_gate = max(event * 0.55, jitter * 4.0, noise * 3.0, 2.0)
             if abs(z - output) <= jitter * 0.35:
                 target = output
                 alpha = 0.0
+            elif abs(float(b) - output) < refuel_gate:
+                # Sửa lỗi: Dùng vùng chết đối xứng và tốc độ 3% để nó dần bò lên được 812
+                # thay vì bị kẹt vĩnh viễn ở 798 do alpha = 0.0
+                target = float(b)
+                alpha = 0.03
             else:
                 target = float(b)
-                alpha = 0.45
+                alpha = 0.85
             pending_drain = None
         else:
-            target = float(b)
-            alpha = 0.65
+            # Ở đoạn bình thường (NORMAL, CONSUMPTION, v.v.), không nhiễu nhiều
+            refuel_gate = max(event * 0.55, jitter * 4.0, noise * 3.0, 2.0)
+            if abs(float(b) - output) < refuel_gate:
+                target = float(b)
+                alpha = 0.03
+            else:
+                target = float(b)
+                alpha = 1.0
             pending_drain = None
 
         in_noise_episode = noise_hold > 0 and state not in {"REFUEL", "DRAIN", "SPIKE", "CONSUMPTION"}
@@ -427,7 +439,7 @@ with st.expander("🏆 PERFORMANCE MATRIX / METRIC HEATMAP", expanded=False):
         fig_heat['data'][0]['showscale'] = True
         fig_heat['data'][0]['colorbar'] = dict(title='Scale (0-1)')
         
-        st.plotly_chart(fig_heat, use_container_width=True)
+        st.plotly_chart(fig_heat, width='stretch')
         st.markdown("*Lưu ý: 🟩 Xanh = Tốt nhất, 🟥 Đỏ = Kém nhất. Mỗi hàng được chuẩn hóa độc lập theo thang Min-Max.*")
     except Exception as e:
         st.warning(f"Chưa tìm thấy dữ liệu Benchmark. Vui lòng chạy script `benchmark_cnn.py` trước. Lỗi: {e}")
@@ -828,8 +840,13 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         
         df_seg.loc[group.index, 'Custom_Kalman'] = kalman_std_vals
         df_seg.loc[group.index, 'Custom_Adaptive_Kalman'] = kalman_adapt_vals
+        
+        # Chạy hàm thuật toán bạn vừa tự sửa để cập nhật lên biểu đồ
+        df_seg_subset = df_seg.loc[group.index]
+        df_seg.loc[group.index, 'AI_Enhanced_Kalman'] = build_ai_enhanced_kalman(df_seg_subset)
+        
         if 'AI_State_Filtered' in df_seg.columns:
-            df_seg.loc[group.index, 'AI_Enhanced_Kalman'] = df_seg.loc[group.index, 'AI_State_Filtered']
+            pass  # Giữ nguyên bản gốc để backup
 # Restore original order just in case
 df_seg = df_seg.sort_values("_OriginalOrder", kind="stable").drop(columns="_OriginalOrder")
 
@@ -1001,6 +1018,6 @@ fig.update_traces(
     selector=dict(type="scattergl"),
 )
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, width='stretch')
 
 st.info("💡 **Hướng dẫn:** Các thuật toán Moving Average và Median Filter hiện đã được cập nhật logic an toàn (Reset khi mất sóng) và loại bỏ khoảng Burn-in (Chỉ vẽ đường thẳng khi đã gom đủ dữ liệu). Hãy thử kéo thanh trượt N để thấy sự khác biệt!")

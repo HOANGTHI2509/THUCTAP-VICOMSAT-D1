@@ -3,6 +3,7 @@ import os
 import sys
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -102,8 +103,17 @@ class BoLocKalmanThichNghi1D:
                 R_thich_nghi = max(4.0, R_thich_nghi * 0.55)
                 Q_thich_nghi *= 8.0
             
+            # Phân dải Vận Tốc (Speed Buckets) thay vì tuyến tính
             if van_toc > 0:
-                R_thich_nghi *= max(1.0, van_toc / 30.0)
+                if van_toc <= 5.0:
+                    pass # Đã được ưu tiên giảm R ở stable_sensor_context nếu dao động thấp
+                elif van_toc <= 40.0:
+                    R_thich_nghi *= 2.0  # Đi phố, stop-and-go -> Sóng sánh nhiều
+                elif van_toc <= 70.0:
+                    R_thich_nghi *= 1.5  # Tốc độ vừa, đường thoáng -> Ít sóng sánh hơn đi phố
+                else:
+                    R_thich_nghi *= 2.5  # Tốc độ cao (>70) -> Rung xóc và sức cản gió lớn
+
             if abs(gia_toc) > 0.1:
                 R_thich_nghi *= 3.0
 
@@ -134,6 +144,8 @@ def chay_kalman_thich_nghi_cho_tat_ca_xe(
     print("=== BẮT ĐẦU CHẠY ADAPTIVE KALMAN FILTER (INNOVATION GATING) ===")
     danh_sach_file = sorted(glob.glob(mau_ten_file))
     if not danh_sach_file: return
+    
+    da_ve_bieu_do = False
 
     for duong_dan_file in danh_sach_file:
         ma_xe = os.path.basename(duong_dan_file).replace("CarFuelHistory_Processed_", "").replace(".csv", "")
@@ -216,6 +228,18 @@ def chay_kalman_thich_nghi_cho_tat_ca_xe(
         duong_dan_xuat = duong_dan_file.replace(".csv", "_Kalman_Adaptive.csv")
         df.to_csv(duong_dan_xuat, index=False, encoding="utf-8-sig")
         print(f"Hoàn tất {ma_xe}! Đã xuất: {duong_dan_xuat}")
+
+        if not da_ve_bieu_do:
+            plt.figure(figsize=(12, 6))
+            plt.plot(df['FuelTime'], df['FuelLevel'], label='Xăng Gốc (Thô)', color='red', alpha=0.5)
+            plt.plot(df['FuelTime'], df['Kalman_Adaptive'], label='Adaptive Kalman (Khử nhiễu)', color='blue', linewidth=2)
+            plt.title(f"So sánh Xăng Gốc và Adaptive Kalman - Xe {ma_xe}")
+            plt.xlabel("Thời gian")
+            plt.ylabel("Lít")
+            plt.legend()
+            plt.grid(True)
+            plt.show()
+            da_ve_bieu_do = True
 
     print("=== ĐÃ CHẠY XONG ADAPTIVE KALMAN (GATING) ===")
 
