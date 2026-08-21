@@ -45,11 +45,9 @@ class BoLocKalmanThichNghi1D:
 
         nguong_hien_tai = max(self.threshold, 2.0 * rolling_std)
 
-        if xac_nhan_nap_nhanh and phan_du > max(0.8, nguong_hien_tai * 0.20):
-            if phan_du > nguong_hien_tai:
-                self.x = z
-            else:
-                self.x = self.x + 0.88 * phan_du
+        if xac_nhan_nap_nhanh and phan_du >= 1.5:
+            # Nhảy thẳng 100% lên mức xăng thô ngay lập tức (không trễ) để bám khít đường nạp nhiên liệu
+            self.x = z
             self.P = 4.0
             self.so_nhip_nhieu_lon = 0
             self.dau_nhieu_truoc_do = 0
@@ -61,7 +59,7 @@ class BoLocKalmanThichNghi1D:
             or abs(gia_toc) > 0.12
         )
 
-        if phan_du_tuyet_doi > nguong_hien_tai and noise_context:
+        if phan_du_tuyet_doi > nguong_hien_tai:
             if dau_hien_tai == self.dau_nhieu_truoc_do or self.dau_nhieu_truoc_do == 0:
                 self.so_nhip_nhieu_lon += 1
             else:
@@ -160,15 +158,20 @@ def chay_kalman_thich_nghi_cho_tat_ca_xe(
         
         df["Kalman_Adaptive"] = np.nan
         
+        if "TimeGapMinutes" in df.columns:
+            time_gaps = pd.to_numeric(df["TimeGapMinutes"], errors="coerce").dropna().to_numpy()
+            valid_gaps = time_gaps[time_gaps > 0]
+            thoi_gian_chuan_phut = float(np.median(valid_gaps)) if len(valid_gaps) > 0 else 5.0
+        else:
+            thoi_gian_chuan_phut = 5.0
+
         # Luôn tính lại gia tốc (m/s^2) chuẩn xác
         if "Speed" in df.columns:
-            time_gap_sec = df["TimeGapMinutes"].fillna(5.0) * 60.0
+            time_gap_sec = df["TimeGapMinutes"].fillna(thoi_gian_chuan_phut) * 60.0
             safe_time_gap = time_gap_sec.replace(0, 1.0)
             df["Acceleration"] = (df.groupby("SegmentID", dropna=False)["Speed"].diff().fillna(0.0) / 3.6) / safe_time_gap
         else:
             df["Acceleration"] = 0.0
-        
-        thoi_gian_chuan_phut = 5.0 # Mặc định 5 phút mỗi mẫu
 
         for ma_doan, nhom in df.groupby("SegmentID", sort=False, dropna=False):
             kf = None

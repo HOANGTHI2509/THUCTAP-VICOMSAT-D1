@@ -14,6 +14,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 # Custom Imports
 from src.core.filters import kalman_traditional as kalman
 from src.core.filters import kalman_adaptive
+from src.core.filters.median_filter import apply_median_filter
 BoLocKalmanThichNghi1D = kalman_adaptive.BoLocKalmanThichNghi1D
 is_valid_measurement = kalman_adaptive.is_valid_measurement
 classify_signal_modes = getattr(kalman_adaptive, "classify_signal_modes", None)
@@ -239,144 +240,49 @@ def build_ai_enhanced_kalman(group: pd.DataFrame) -> list[float]:
                 noise_dir = 0
                 noise_dir_count = 0
         if pd.isna(output):
-            output = float(b)
+            output = float(z)
             enhanced[i] = output
             continue
 
-        if state == "SPIKE":
-            target = output
-            alpha = 0.0
-            pending_drain = None
-        elif state == "REFUEL":
-            next_window = raw[i + 1 : i + 4]
-            next_window = next_window[~np.isnan(next_window)]
-            future_median = float(np.median(next_window)) if len(next_window) else float(z)
-            delta_up = float(z) - output
-            refuel_gate = max(event * 0.55, jitter * 4.0, noise * 3.0, 2.0)
-            future_stays_high = (
-                len(next_window) > 0
-                and future_median >= output + refuel_gate * 0.60
-                and abs(future_median - float(z)) <= max(abs(delta_up) * 0.45, event * 0.60, jitter * 5.0)
-            )
-            slow_or_stopped_confirm = (
-                current_speed <= 3.0
-                and len(next_window) > 0
-                and future_median >= output + refuel_gate * 0.45
-            )
-            if delta_up >= refuel_gate and (future_stays_high or slow_or_stopped_confirm):
-                target = max(float(z), future_median)
-                alpha = 0.96
-                refuel_floor = target - max(event * 0.20, jitter * 2.0, noise * 2.0, 1.0)
-                refuel_settle = 4
-                refuel_drop_count = 0
-                noise_hold = 0
-                noise_anchor = np.nan
-                noise_dir = 0
-                noise_dir_count = 0
-            else:
-                target = output
-                alpha = 0.0
-            pending_drain = None
-        elif state == "DRAIN":
-            refuel_settle = 0
-            refuel_floor = np.nan
-            refuel_drop_count = 0
-            if pending_drain is None:
-                pending_drain = float(z)
-                target = min(float(b), float(z))
-                alpha = 0.45
-            else:
-                target = min(float(b), float(z), pending_drain)
-                alpha = 0.90
-            noise_hold = 0
-            noise_anchor = np.nan
-            noise_dir = 0
-            noise_dir_count = 0
-        elif state == "SLOSHING_NOISE":
-            target = base_median
-            alpha = 0.035
-            pending_drain = None
-        elif state == "STABLE_JITTER":
-            refuel_gate = max(event * 0.55, jitter * 4.0, noise * 3.0, 2.0)
-            if abs(z - output) <= jitter * 0.35:
-                target = output
-                alpha = 0.0
-            elif abs(float(b) - output) < refuel_gate:
-                # Sửa lỗi: Dùng vùng chết đối xứng và tốc độ 3% để nó dần bò lên được 812
-                # thay vì bị kẹt vĩnh viễn ở 798 do alpha = 0.0
-                target = float(b)
-                alpha = 0.03
-            else:
-                target = float(b)
-                alpha = 0.85
-            pending_drain = None
+        # 1. Khử nhiễu gai đốm 1 điểm bằng Trung vị 3 điểm lân cận
+        prev_z = raw[i - 1] if i > 0 and not pd.isna(raw[i - 1]) else z
+        next_z = raw[i + 1] if i < len(group) - 1 and not pd.isna(raw[i + 1]) else z
+        local_median = float(np.median([prev_z, z, next_z]))
+        
+        # Nếu điểm thô rớt/vọt 1 điểm bất thường (> 4L so với trung vị lân cận) -> Lấy trung vị lân cận
+        if abs(z - local_median) > max(3.5, jitter * 2.5):
+            z_clean = local_median
         else:
-            # Ở đoạn bình thường (NORMAL, CONSUMPTION, v.v.), không nhiễu nhiều
-            refuel_gate = max(event * 0.55, jitter * 4.0, noise * 3.0, 2.0)
-            if abs(float(b) - output) < refuel_gate:
-                target = float(b)
-                alpha = 0.03
-            else:
-                target = float(b)
+            z_clean = z
+
+        # 2. Cửa sổ tương lai xác nhận
+        next_window = raw[i + 1 : i + 5]
+        next_window = next_window[~np.isnan(next_window)]
+        future_median = float(np.median(next_window)) if len(next_window) > 0 else z_clean
+
+        delta = z_clean - output
+        
+        # 3. Phân kịch bản lọc mượt
+        if delta >= 3.5:
+            # Nhiên liệu thô vọt lên: Kiểm tra xác nhận Nạp Xăng Thật!
+            is_real_refuel = (future_median >= output + 3.0)
+            
+            if is_real_refuel:
+                # ĐOẠN NẠP XĂNG THẬT: Bám sát khít đỉnh nạp nhiên liệu 100% (y hệt đường đen)!
+                # Không bị trễ nhịp như đường xanh.
+                target = max(z_clean, future_median)
                 alpha = 1.0
-            pending_drain = None
-
-        in_noise_episode = noise_hold > 0 and state not in {"REFUEL", "DRAIN", "SPIKE", "CONSUMPTION"}
-        if in_noise_episode:
-            if pd.isna(noise_anchor):
-                noise_anchor = output
-
-            deviation_from_anchor = base_median - noise_anchor
-            raw_deviation_from_anchor = float(z) - noise_anchor
-            current_dir = int(np.sign(deviation_from_anchor)) if abs(deviation_from_anchor) > jitter else 0
-            if current_dir != 0 and current_dir == noise_dir:
-                noise_dir_count += 1
-            elif current_dir != 0:
-                noise_dir = current_dir
-                noise_dir_count = 1
             else:
-                noise_dir = 0
-                noise_dir_count = 0
-
-            sustained_level_shift = (
-                noise_dir_count >= 3
-                and current_dir != 0
-                and abs(deviation_from_anchor) >= max(event * 0.35, jitter * 3.0, noise * 2.5)
-                and abs(raw_deviation_from_anchor) >= max(event * 0.35, jitter * 3.0, noise * 2.5)
-                and np.sign(raw_deviation_from_anchor) == current_dir
-            )
-
-            if sustained_level_shift:
-                noise_hold = 0
-                noise_anchor = np.nan
-                target = base_median
-                alpha = max(alpha, 0.55)
-                in_noise_episode = False
-            elif noise_dir_count >= 8:
-                target = base_median
-                alpha = min(alpha, 0.035)
-            else:
-                target = noise_anchor
-                alpha = min(alpha, 0.015)
+                # Nhiễu bồng bềnh / kẹt phao tạm thời khi đỗ: GIỮ NGUYÊN MỐC NỀN (alpha = 0.0) -> Triệt tiêu ngọn núi ảo 807L!
+                target = output
+                alpha = 0.0
+        else:
+            # TẤT CẢ CÁC ĐOẠN KHÁC (Bình thường, Tiêu hao, Sóng sánh):
+            # Đi y hệt đường màu xanh (Adaptive Kalman) vì đường xanh xử lý các đoạn này đã quá tốt!
+            target = float(b)
+            alpha = 0.85  # Vuốt mượt nhẹ nhàng nhập vào đường xanh
 
         next_output = output + alpha * (target - output)
-        if refuel_settle > 0 and state not in {"DRAIN", "SPIKE"} and not pd.isna(refuel_floor):
-            if float(z) < refuel_floor - max(event * 0.25, jitter * 2.0, noise * 2.0):
-                refuel_drop_count += 1
-            else:
-                refuel_drop_count = 0
-
-            if refuel_drop_count < 2:
-                next_output = max(next_output, refuel_floor)
-                refuel_settle -= 1
-            else:
-                refuel_settle = 0
-                refuel_floor = np.nan
-                refuel_drop_count = 0
-
-        if in_noise_episode:
-            max_step = max(jitter * 0.12, noise * 0.20, 0.06)
-            next_output = float(np.clip(next_output, output - max_step, output + max_step))
         output = next_output
         if output < 0:
             output = 0.0
@@ -543,14 +449,12 @@ vehicle_profile = load_vehicle_profile(selected_car, df)
 min_date = df['FuelTime'].min().date()
 max_date = df['FuelTime'].max().date()
 
-# Đặt mặc định chỉ hiển thị 7 ngày cuối cùng để tránh biểu đồ bị nén thành mã vạch (Bar-code effect) đối với xe có lịch sử quá dài (vài tháng)
 default_start_date = max(min_date, max_date - pd.Timedelta(days=7))
 
 with st.sidebar:
     st.markdown("---")
     st.header("📅 Bộ lọc Thời gian")
     
-    # Check if car changed, if so, reset the date range
     if "last_car" not in st.session_state or st.session_state.last_car != selected_car:
         st.session_state.date_range_key = (default_start_date, max_date)
         st.session_state.last_car = selected_car
@@ -567,7 +471,6 @@ with st.sidebar:
         key="date_range_key"
     )
 
-# Áp dụng filter ngày
 if len(date_range) == 2:
     start_date, end_date = date_range
     df = df[(df['FuelTime'].dt.date >= start_date) & (df['FuelTime'].dt.date <= end_date)]
@@ -585,17 +488,14 @@ with st.sidebar:
     segment_options = ["Toàn bộ dữ liệu trong khoảng thời gian (All)"] + list(df['SegmentID'].dropna().unique())
     selected_segment = st.selectbox("Hiển thị theo phân đoạn", segment_options)
 
-# Filter data
 if selected_segment == "Toàn bộ dữ liệu trong khoảng thời gian (All)":
     df_seg = df.copy()
 else:
     df_seg = df[df['SegmentID'] == selected_segment].copy()
 
-# Sắp xếp thời gian an toàn theo chuẩn Reviewer
 df_seg["_OriginalOrder"] = np.arange(len(df_seg))
 df_seg = df_seg.sort_values(["SegmentID", "FuelTime", "_OriginalOrder"], kind="stable")
 
-# Tính capacity ước lượng từ df_seg để cấu hình tự động
 estimated_capacity = vehicle_profile.capacity_est
 if pd.isna(estimated_capacity) or estimated_capacity < 50.0:
     estimated_capacity = df_seg['FuelLevel'].quantile(0.99)
@@ -620,16 +520,15 @@ with st.sidebar:
         f"spike={vehicle_profile.spike_threshold:.1f}L"
     )
 
-# Apply Custom Algorithms
 with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
     df_seg['Custom_Kalman'] = np.nan
     df_seg['Custom_Adaptive_Kalman'] = np.nan
     df_seg['AI_Enhanced_Kalman'] = np.nan
+    df_seg['Median_Filter'] = np.nan
     df_seg['FuelLevel_Filtered_EMA'] = np.nan
     df_seg['FuelLevel_Filtered_Edge'] = np.nan
     df_seg['FuelLevel_Filtered_AlphaBeta'] = np.nan
     
-    # Tiền xử lý: Tính Gia tốc (Acceleration) nếu chưa có
     if "Acceleration" not in df_seg.columns:
         if "Speed" in df_seg.columns:
             time_gap_sec = df_seg["TimeGapMinutes"].fillna(5.0) * 60.0
@@ -731,7 +630,6 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
             gap = getattr(dong, "TimeGapMinutes", reference_gap)
             if pd.isna(gap) or gap <= 0: gap = reference_gap
             
-            # Feature logic
             speed_value = float(getattr(dong, 'Speed', 0.0) or 0.0)
             movement_raw = str(getattr(dong, "MovementState", "")).strip().upper()
             if movement_raw in {"STOPPED", "STOP", "IDLE"}:
@@ -752,7 +650,6 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
                 P_p.append(0.0)
                 continue
             
-            # Tầng 2: Adaptive Kalman đọc tín hiệu đã sạch từ Tầng 1
             measurement = float(getattr(dong, adaptive_source_col, dong.FuelLevel))
             future_values = pd.to_numeric(
                 group[adaptive_source_col].iloc[i_loc + 1 : i_loc + 3],
@@ -792,7 +689,6 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
                 and abs(future_median - measurement) <= max(refuel_gate, abs(measurement - previous_adaptive) * 0.45)
             )
             
-            # Kalman Standard
             khoang_thoi_gian_std = gap + khoang_thoi_gian_tich_luy_std
             khoang_thoi_gian_tich_luy_std = 0.0
             dt_ratio = khoang_thoi_gian_std / reference_gap
@@ -803,7 +699,6 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
             else:
                 kalman_std_vals.append(kf_std.cap_nhat(measurement, ty_le_dt=dt_ratio))
                 
-            # Kalman Adaptive
             khoang_thoi_gian_adapt = gap + khoang_thoi_gian_tich_luy_adapt
             khoang_thoi_gian_tich_luy_adapt = 0.0
             if kf_adapt is None:
@@ -824,7 +719,6 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
                 )
                 x_f.append(measurement)
             else:
-                # Adaptive Kalman Forward Pass (No RTS Smoother for realtime)
                 x_forward = kf_adapt.cap_nhat(
                     measurement, 
                     ty_le_dt=dt_ratio, 
@@ -841,9 +735,9 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         df_seg.loc[group.index, 'Custom_Kalman'] = kalman_std_vals
         df_seg.loc[group.index, 'Custom_Adaptive_Kalman'] = kalman_adapt_vals
         
-        # Chạy hàm thuật toán bạn vừa tự sửa để cập nhật lên biểu đồ
         df_seg_subset = df_seg.loc[group.index]
         df_seg.loc[group.index, 'AI_Enhanced_Kalman'] = build_ai_enhanced_kalman(df_seg_subset)
+        df_seg.loc[group.index, 'Median_Filter'] = apply_median_filter(df_seg_subset, window_size=10)
         
         if 'AI_State_Filtered' in df_seg.columns:
             pass  # Giữ nguyên bản gốc để backup
@@ -945,6 +839,13 @@ for seg_id, group in df_seg.groupby('SegmentID', sort=False):
                                  mode='lines', name='AI-Enhanced Adaptive Kalman',
                                  legendgroup='ai_enhanced_kalman', showlegend=show_legend,
                                  line=dict(color='#8A2BE2', width=2.5), connectgaps=True),
+                      row=1, col=1, secondary_y=False)
+
+    if 'Median_Filter' in group.columns:
+        fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Median_Filter'],
+                                 mode='lines', name='Median Filter (N=10)',
+                                 legendgroup='median_filter', showlegend=show_legend,
+                                 line=dict(color='#FF1493', width=2.0), connectgaps=True),
                       row=1, col=1, secondary_y=False)
 
     if show_experimental_debug_traces and 'AI_State' in group.columns:
