@@ -1,0 +1,14 @@
+{
+    "model": "1D-CNN + Gated Attention",
+    "input_dim": 6,
+    "hidden_dim": 64,
+    "kernel_size": 3,
+    "window_size": 10,
+    "batch_size": 256,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "loss_function": "HuberLoss(delta=0.05)",
+    "best_val_loss": 0.00045568322151814245,
+    "total_params": 17518,
+    "train_time_seconds": 120.31110787391663
+}

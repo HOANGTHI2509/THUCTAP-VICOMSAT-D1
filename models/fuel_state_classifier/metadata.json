@@ -1,0 +1,92 @@
+{
+  "model_type": "random_forest",
+  "feature_columns": [
+    "FuelLevel",
+    "FuelPct",
+    "Speed",
+    "MotionSpeedKmh",
+    "TimeGapMinutes",
+    "DeltaFuel",
+    "DeltaPct",
+    "AbsDeltaFuel",
+    "DeltaOverNoise",
+    "RollingStd12",
+    "RollingStdPct",
+    "DistanceMeters",
+    "GpsSpeedKmh",
+    "HasGPS",
+    "capacity_est",
+    "noise_sigma_liters",
+    "flat_jitter_threshold",
+    "spike_threshold",
+    "event_threshold",
+    "PrevMedian3",
+    "FutureMedian3",
+    "FutureMedian5",
+    "ReturnToPrevLevel",
+    "LocalRange5",
+    "LocalRange7",
+    "PeakReversalFlag",
+    "ValleyReversalFlag",
+    "TransientScore"
+  ],
+  "labels": [
+    "STABLE_JITTER",
+    "CONSUMPTION",
+    "SLOSHING_NOISE",
+    "REFUEL",
+    "DRAIN"
+  ],
+  "merge_labels": {
+    "DROPOUT": "SLOSHING_NOISE",
+    "SPIKE": "SLOSHING_NOISE",
+    "SPIKE_UP": "SLOSHING_NOISE",
+    "SPIKE_DOWN": "SLOSHING_NOISE",
+    "TRANSIENT_NOISE": "SLOSHING_NOISE",
+    "TRANSIENT_UP_NOISE": "SLOSHING_NOISE",
+    "TRANSIENT_DOWN_NOISE": "SLOSHING_NOISE",
+    "TRANSIENT_CLUSTER_NOISE": "SLOSHING_NOISE",
+    "NORMAL": "STABLE_JITTER"
+  },
+  "drop_labels": [
+    "",
+    "INVALID",
+    "UNKNOWN"
+  ],
+  "train_raw_count": 268916,
+  "train_balanced_count": 61466,
+  "val_count": 20171,
+  "test_count": 23483,
+  "stable_limit": 30000,
+  "rare_target": 1500,
+  "confusion_matrix_artifacts": {
+    "validation": {
+      "csv": "D:\\THUCTAP_VICOMSAT\\models\\fuel_state_classifier\\validation_confusion_matrix.csv",
+      "png": "D:\\THUCTAP_VICOMSAT\\models\\fuel_state_classifier\\validation_confusion_matrix.png"
+    },
+    "test": {
+      "csv": "D:\\THUCTAP_VICOMSAT\\models\\fuel_state_classifier\\test_confusion_matrix.csv",
+      "png": "D:\\THUCTAP_VICOMSAT\\models\\fuel_state_classifier\\test_confusion_matrix.png"
+    }
+  },
+  "per_vehicle_test_artifacts": {
+    "90H-03494": {
+      "rows": 4979,
+      "accuracy": 0.9981924081140792,
+      "csv": "D:\\THUCTAP_VICOMSAT\\models\\fuel_state_classifier\\test_90h-03494_confusion_matrix.csv",
+      "png": "D:\\THUCTAP_VICOMSAT\\models\\fuel_state_classifier\\test_90h-03494_confusion_matrix.png"
+    },
+    "92H-02687": {
+      "rows": 4806,
+      "accuracy": 0.997919267582189,
+      "csv": "D:\\THUCTAP_VICOMSAT\\models\\fuel_state_classifier\\test_92h-02687_confusion_matrix.csv",
+      "png": "D:\\THUCTAP_VICOMSAT\\models\\fuel_state_classifier\\test_92h-02687_confusion_matrix.png"
+    },
+    "Car 5": {
+      "rows": 13698,
+      "accuracy": 0.955905971674697,
+      "csv": "D:\\THUCTAP_VICOMSAT\\models\\fuel_state_classifier\\test_car_5_confusion_matrix.csv",
+      "png": "D:\\THUCTAP_VICOMSAT\\models\\fuel_state_classifier\\test_car_5_confusion_matrix.png"
+    }
+  }
+}

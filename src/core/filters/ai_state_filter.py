@@ -67,7 +67,7 @@ def _dt_alpha(alpha: float, dt_minutes: float, reference_minutes: float) -> floa
     return float(1.0 - (1.0 - alpha) ** ratio)
 
 
-def _ensure_ai_features(df: pd.DataFrame, profile=None) -> pd.DataFrame:
+def _ensure_ai_features(df: pd.DataFrame, profile=None, mode: str = "offline") -> pd.DataFrame:
     result = df.sort_values("FuelTime", kind="stable").copy()
     state_profile = build_fuel_state_profile(result, profile)
 
@@ -116,11 +116,18 @@ def _ensure_ai_features(df: pd.DataFrame, profile=None) -> pd.DataFrame:
     result["spike_threshold"] = state_profile.spike_threshold
     result["event_threshold"] = state_profile.event_threshold
     prev_median3 = fuel.rolling(window=3, min_periods=1).median().shift(1).fillna(fuel)
-    future_median3 = fuel.iloc[::-1].rolling(window=3, min_periods=1).median().iloc[::-1].shift(-1).fillna(fuel)
-    future_median5 = fuel.iloc[::-1].rolling(window=5, min_periods=1).median().iloc[::-1].shift(-1).fillna(fuel)
-    local_range5 = fuel.rolling(window=5, center=True, min_periods=1).max() - fuel.rolling(window=5, center=True, min_periods=1).min()
-    local_range7 = fuel.rolling(window=7, center=True, min_periods=1).max() - fuel.rolling(window=7, center=True, min_periods=1).min()
-    next_fuel = fuel.shift(-1).fillna(fuel)
+    if mode == "offline":
+        future_median3 = fuel.iloc[::-1].rolling(window=3, min_periods=1).median().iloc[::-1].shift(-1).fillna(fuel)
+        future_median5 = fuel.iloc[::-1].rolling(window=5, min_periods=1).median().iloc[::-1].shift(-1).fillna(fuel)
+        local_range5 = fuel.rolling(window=5, center=True, min_periods=1).max() - fuel.rolling(window=5, center=True, min_periods=1).min()
+        local_range7 = fuel.rolling(window=7, center=True, min_periods=1).max() - fuel.rolling(window=7, center=True, min_periods=1).min()
+        next_fuel = fuel.shift(-1).fillna(fuel)
+    else:
+        future_median3 = prev_median3
+        future_median5 = prev_median3
+        local_range5 = fuel.rolling(window=5, min_periods=1).max() - fuel.rolling(window=5, min_periods=1).min()
+        local_range7 = fuel.rolling(window=7, min_periods=1).max() - fuel.rolling(window=7, min_periods=1).min()
+        next_fuel = fuel
     result["PrevMedian3"] = prev_median3
     result["FutureMedian3"] = future_median3
     result["FutureMedian5"] = future_median5
@@ -133,8 +140,8 @@ def _ensure_ai_features(df: pd.DataFrame, profile=None) -> pd.DataFrame:
     return result
 
 
-def predict_ai_fuel_state(df: pd.DataFrame, model, metadata: dict | None, profile=None) -> pd.DataFrame:
-    result = _ensure_ai_features(df, profile)
+def predict_ai_fuel_state(df: pd.DataFrame, model, metadata: dict | None, profile=None, mode: str = "offline") -> pd.DataFrame:
+    result = _ensure_ai_features(df, profile, mode=mode)
     result["AI_State_Raw"] = ""
     result["AI_State"] = ""
     result["AI_State_Confidence"] = np.nan
@@ -155,10 +162,13 @@ def predict_ai_fuel_state(df: pd.DataFrame, model, metadata: dict | None, profil
     if hasattr(model, "predict_proba"):
         result["AI_State_Confidence"] = model.predict_proba(x_data).max(axis=1)
 
-    return _postprocess_ai_state(result)
+    return _postprocess_ai_state(result, mode=mode)
 
 
-def _postprocess_ai_state(df: pd.DataFrame) -> pd.DataFrame:
+def _postprocess_ai_state(df: pd.DataFrame, mode: str = "offline") -> pd.DataFrame:
+    if mode == "realtime":
+        return df.sort_values("FuelTime", kind="stable").copy() if "FuelTime" in df.columns else df.copy()
+
     result = df.sort_values("FuelTime", kind="stable").copy()
     if "SegmentID" in result.columns:
         groups = result.groupby("SegmentID", sort=False)
@@ -284,9 +294,10 @@ def filter_with_ai_state(
     tcn_metadata: dict | None = None,
     profile=None,
     config: AIStateFilterConfig | None = None,
+    mode: str = "offline",
 ) -> pd.DataFrame:
     config = config or AIStateFilterConfig()
-    result = predict_ai_fuel_state(df, model, metadata, profile)
+    result = predict_ai_fuel_state(df, model, metadata, profile, mode=mode)
     result = _apply_rf_tcn_ensemble(result, tcn_model=tcn_model, tcn_metadata=tcn_metadata)
 
     filtered = np.full(len(result), np.nan, dtype=float)
@@ -312,14 +323,38 @@ def filter_with_ai_state(
     if pd.isna(reference_gap) or reference_gap <= 0:
         reference_gap = 5.0
 
+    segments = result["SegmentID"].to_numpy() if "SegmentID" in result.columns else np.zeros(len(result))
+    prev_segment = None
     recent_up_event = None
+    pending_event = None
 
     for i, raw in enumerate(fuels):
+        current_segment = segments[i]
         state = states[i]
         flat = max(float(flat_values[i]), 0.1)
         noise = max(float(noise_values[i]), 0.1)
         rolling_std = max(float(rolling_std_values[i]), 0.0)
         dt_minutes = float(time_gaps[i]) if i < len(time_gaps) and time_gaps[i] > 0 else reference_gap
+        
+        if current_segment != prev_segment or dt_minutes > max(15.0, reference_gap * 3):
+            output = float(raw)
+            filtered[i] = output
+            clean_input[i] = raw
+            prev_raw = float(raw)
+            pending_event = None
+            pending_drain = None
+            pending_shift = None
+            stable_anchor = None
+            recent_up_event = None
+            stable_clean_count = 0
+            down_trend_count = 0
+            up_trend_count = 0
+            stable_recent_values = []
+            prev_segment = current_segment
+            continue
+            
+        prev_segment = current_segment
+
         if pd.isna(raw) or raw <= 0:
             filtered[i] = output
             clean_input[i] = output
@@ -363,95 +398,139 @@ def filter_with_ai_state(
         spike = float(result.iloc[i].get("spike_threshold", max(flat * 2.0, 2.0)) or max(flat * 2.0, 2.0))
         shift_gate = max(event * 0.55, spike * 1.2, flat * 3.0)
         level_shift_confirmed = False
-        next_window = fuels[i + 1 : i + 4]
-        next_window = next_window[~np.isnan(next_window)]
-        future_median = float(np.median(next_window)) if len(next_window) else float(raw)
         previous_output = float(output)
-        moderate_up_shift = (
-            delta > max(flat * 1.2, noise * 1.6, 0.8)
-            and delta < shift_gate
-            and len(next_window) >= 1
-            and future_median >= previous_output + max(flat * 0.8, noise * 1.1, 0.5)
-            and abs(future_median - float(raw)) <= max(flat * 5.0, noise * 5.0, abs(delta) * 1.20)
-        )
-        short_bump_returns = (
-            delta > shift_gate
-            and len(next_window) >= 1
-            and abs(future_median - previous_output) <= max(flat * 2.0, abs(delta) * 0.30)
-        )
-        short_drop_returns = (
-            delta < -shift_gate
-            and len(next_window) >= 1
-            and abs(future_median - previous_output) <= max(flat * 2.0, abs(delta) * 0.30)
-        )
-        next_step = float(next_window[0] - raw) if len(next_window) else 0.0
-        peak_reversal = raw_step > flat * 0.45 and next_step < -flat * 0.45
-        trough_reversal = raw_step < -flat * 0.45 and next_step > flat * 0.45
-        local_window = fuels[max(0, i - 2) : min(len(fuels), i + 3)]
-        local_window = local_window[~np.isnan(local_window)]
-        local_span = float(local_window.max() - local_window.min()) if len(local_window) >= 3 else 0.0
-        mountain_reversal = (
-            len(next_window) >= 1
-            and delta > max(flat * 3.0, shift_gate * 0.45)
-            and next_step < -max(flat * 1.5, abs(delta) * 0.25)
-            and future_median <= previous_output + max(flat * 2.0, abs(delta) * 0.35)
-        )
-        valley_reversal = (
-            len(next_window) >= 1
-            and delta < -max(flat * 3.0, shift_gate * 0.45)
-            and next_step > max(flat * 1.5, abs(delta) * 0.25)
-            and future_median >= previous_output - max(flat * 2.0, abs(delta) * 0.35)
-        )
-        local_burst_noise = (
-            local_span >= max(shift_gate * 0.65, flat * 4.0)
-            and len(next_window) >= 2
-            and abs(future_median - previous_output) <= max(flat * 2.5, local_span * 0.35)
-        )
-        short_excursion_returns = (
-            len(next_window) >= 1
-            and abs(delta) >= max(shift_gate * 0.60, flat * 4.0)
-            and abs(future_median - previous_output) <= max(flat * 3.0, abs(delta) * 0.40)
-        )
-        up_excursion_then_drop = (
-            delta > max(flat * 2.0, noise * 2.0, 1.0)
-            and len(next_window) >= 2
-            and next_step < -max(flat * 0.8, noise * 0.8, 0.5)
-            and future_median <= previous_output + max(flat * 2.0, abs(delta) * 0.45)
-        )
 
-        if (
-            short_bump_returns
-            or short_drop_returns
-            or peak_reversal
-            or trough_reversal
-            or mountain_reversal
-            or valley_reversal
-            or local_burst_noise
-            or short_excursion_returns
-            or up_excursion_then_drop
-        ):
-            if mountain_reversal or valley_reversal or local_burst_noise or up_excursion_then_drop:
-                state = TRANSIENT_STATE
-            else:
-                state = "SPIKE"
-            pending_shift = None
-        elif state == "SPIKE" or state in TRANSIENT_LABELS or abs(delta) < shift_gate:
-            pending_shift = None
-        else:
-            direction = 1 if delta > 0 else -1
+        if mode == "offline":
+            next_window = fuels[i + 1 : i + 4]
+            next_window = next_window[~np.isnan(next_window)]
+            future_median = float(np.median(next_window)) if len(next_window) else float(raw)
+            moderate_up_shift = (
+                delta > max(flat * 1.2, noise * 1.6, 0.8)
+                and delta < shift_gate
+                and len(next_window) >= 1
+                and future_median >= previous_output + max(flat * 0.8, noise * 1.1, 0.5)
+                and abs(future_median - float(raw)) <= max(flat * 5.0, noise * 5.0, abs(delta) * 1.20)
+            )
+            short_bump_returns = (
+                delta > shift_gate
+                and len(next_window) >= 1
+                and abs(future_median - previous_output) <= max(flat * 2.0, abs(delta) * 0.30)
+            )
+            short_drop_returns = (
+                delta < -shift_gate
+                and len(next_window) >= 1
+                and abs(future_median - previous_output) <= max(flat * 2.0, abs(delta) * 0.30)
+            )
+            next_step = float(next_window[0] - raw) if len(next_window) else 0.0
+            peak_reversal = raw_step > flat * 0.45 and next_step < -flat * 0.45
+            trough_reversal = raw_step < -flat * 0.45 and next_step > flat * 0.45
+            local_window = fuels[max(0, i - 2) : min(len(fuels), i + 3)]
+            local_window = local_window[~np.isnan(local_window)]
+            local_span = float(local_window.max() - local_window.min()) if len(local_window) >= 3 else 0.0
+            mountain_reversal = (
+                len(next_window) >= 1
+                and delta > max(flat * 3.0, shift_gate * 0.45)
+                and next_step < -max(flat * 1.5, abs(delta) * 0.25)
+                and future_median <= previous_output + max(flat * 2.0, abs(delta) * 0.35)
+            )
+            valley_reversal = (
+                len(next_window) >= 1
+                and delta < -max(flat * 3.0, shift_gate * 0.45)
+                and next_step > max(flat * 1.5, abs(delta) * 0.25)
+                and future_median >= previous_output - max(flat * 2.0, abs(delta) * 0.35)
+            )
+            local_burst_noise = (
+                local_span >= max(shift_gate * 0.65, flat * 4.0)
+                and len(next_window) >= 2
+                and abs(future_median - previous_output) <= max(flat * 2.5, local_span * 0.35)
+            )
+            short_excursion_returns = (
+                len(next_window) >= 1
+                and abs(delta) >= max(shift_gate * 0.60, flat * 4.0)
+                and abs(future_median - previous_output) <= max(flat * 3.0, abs(delta) * 0.40)
+            )
+            up_excursion_then_drop = (
+                delta > max(flat * 2.0, noise * 2.0, 1.0)
+                and len(next_window) >= 2
+                and next_step < -max(flat * 0.8, noise * 0.8, 0.5)
+                and future_median <= previous_output + max(flat * 2.0, abs(delta) * 0.45)
+            )
+
             if (
-                pending_shift is not None
-                and pending_shift["direction"] == direction
-                and abs(raw - pending_shift["target"]) <= max(flat * 2.0, abs(delta) * 0.25)
+                short_bump_returns
+                or short_drop_returns
+                or peak_reversal
+                or trough_reversal
+                or mountain_reversal
+                or valley_reversal
+                or local_burst_noise
+                or short_excursion_returns
+                or up_excursion_then_drop
             ):
-                pending_shift["target"] = 0.5 * pending_shift["target"] + 0.5 * float(raw)
-                pending_shift["count"] += 1
+                if mountain_reversal or valley_reversal or local_burst_noise or up_excursion_then_drop:
+                    state = TRANSIENT_STATE
+                else:
+                    state = "SPIKE"
+                pending_shift = None
+            elif state == "SPIKE" or state in TRANSIENT_LABELS or abs(delta) < shift_gate:
+                pending_shift = None
             else:
-                pending_shift = {"direction": direction, "target": float(raw), "count": 1}
+                direction = 1 if delta > 0 else -1
+                if (
+                    pending_shift is not None
+                    and pending_shift["direction"] == direction
+                    and abs(raw - pending_shift["target"]) <= max(flat * 2.0, abs(delta) * 0.25)
+                ):
+                    pending_shift["target"] = 0.5 * pending_shift["target"] + 0.5 * float(raw)
+                    pending_shift["count"] += 1
+                else:
+                    pending_shift = {"direction": direction, "target": float(raw), "count": 1}
 
-            if pending_shift["count"] >= 2 or state in {"REFUEL", "DRAIN"}:
-                level_shift_confirmed = True
-                measurement = float(raw)
+                if pending_shift["count"] >= 2 or state in {"REFUEL", "DRAIN"}:
+                    level_shift_confirmed = True
+                    measurement = float(raw)
+        else:
+            moderate_up_shift = False
+            short_bump_returns = False
+            short_drop_returns = False
+            peak_reversal = False
+            trough_reversal = False
+            mountain_reversal = False
+            valley_reversal = False
+            local_burst_noise = False
+            short_excursion_returns = False
+            up_excursion_then_drop = False
+            
+            if pending_event is not None:
+                pending_event["age"] += 1
+                if abs(raw - pending_event["level_before"]) <= max(flat * 2.0, noise * 2.0):
+                    state = TRANSIENT_STATE
+                    measurement = output
+                    alpha = 0.0
+                    pending_event = None
+                elif abs(raw - pending_event["target"]) <= max(flat * 3.0, abs(delta) * 0.25):
+                    pending_event["count"] += 1
+                    if pending_event["count"] >= config.realtime_confirm_required:
+                        level_shift_confirmed = True
+                        state = pending_event["state"]
+                        measurement = raw
+                        alpha = config.refuel_alpha if state == "REFUEL" else config.drain_alpha
+                        pending_event = None
+                elif pending_event["age"] >= config.realtime_confirm_count:
+                    pending_event = None
+            
+            if pending_event is None and not level_shift_confirmed:
+                if abs(delta) >= shift_gate:
+                    pending_event = {
+                        "state": "REFUEL" if delta > 0 else "DRAIN",
+                        "level_before": previous_output,
+                        "target": raw,
+                        "count": 1,
+                        "age": 0,
+                    }
+                    measurement = output
+                    alpha = config.realtime_event_hold_alpha
+                    state = "PENDING_EVENT"
 
         if state == "SPIKE" or state in TRANSIENT_LABELS:
             measurement = output
