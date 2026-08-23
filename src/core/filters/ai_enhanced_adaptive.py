@@ -110,9 +110,18 @@ def filter_ai_enhanced_adaptive(group: pd.DataFrame, config: dict = None) -> lis
         if not pd.isna(x) and x > 15.0:
             last_valid_x = float(x)
         
-        # Xử lý triệt để Lỗi cảm biến mất tín hiệu/ngắt điện (z sụt đột ngột về <= 20.0L trong khi nhiên liệu cũ > 20.0L)
-        if pd.isna(z) or z <= 20.0:
+        # Xử lý triệt để Lỗi cảm biến mất tín hiệu/ngắt điện
+        # Bắt gọn cả mốc quá độ (z sụt dốc >= 25L về phía 0L) để triệt tiêu vệt kim nhọn
+        future_f, count_f = _future_median(raw, i, width=3)
+        is_zero_dropout = (
+            pd.isna(z)
+            or z <= 20.0
+            or (not pd.isna(last_valid_x) and (last_valid_x - z) >= 20.0 and count_f > 0 and future_f <= 20.0)
+        )
+
+        if is_zero_dropout:
             if not pd.isna(last_valid_x) and last_valid_x > 20.0:
+                x = last_valid_x  # Giữ nguyên trạng thái x chuẩn
                 enhanced[i] = last_valid_x  # Giữ nguyên mức xăng hợp lệ trước đó (~135L)
                 continue
             elif pd.isna(z) or z <= 0:
