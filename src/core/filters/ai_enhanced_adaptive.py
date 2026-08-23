@@ -101,17 +101,22 @@ def filter_ai_enhanced_adaptive(group: pd.DataFrame, config: dict = None) -> lis
     P = 4.0
     drain_count = 0
     drop_count = 0
+    last_valid_x = np.nan
 
     for i in range(len(group)):
         z = raw[i]
         
-        # Xử lý triệt để Lỗi cảm biến mất tín hiệu (z rớt về sát 0L hoặc NaN trong khi x > 15.0L)
-        if pd.isna(z) or z <= 4.0:
-            if not pd.isna(x) and x > 15.0:
-                enhanced[i] = x  # Giữ nguyên mức xăng hợp lệ trước đó (~170L)
+        # Lưu lại mức nhiên liệu hợp lệ trước đó (khi x > 15.0L)
+        if not pd.isna(x) and x > 15.0:
+            last_valid_x = float(x)
+        
+        # Xử lý triệt để Lỗi cảm biến mất tín hiệu/ngắt điện (z sụt đột ngột về <= 20.0L trong khi nhiên liệu cũ > 20.0L)
+        if pd.isna(z) or z <= 20.0:
+            if not pd.isna(last_valid_x) and last_valid_x > 20.0:
+                enhanced[i] = last_valid_x  # Giữ nguyên mức xăng hợp lệ trước đó (~135L)
                 continue
             elif pd.isna(z) or z <= 0:
-                enhanced[i] = x
+                enhanced[i] = x if not pd.isna(x) else 0.0
                 continue
             
         if pd.isna(x):
