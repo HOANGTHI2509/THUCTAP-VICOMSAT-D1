@@ -91,7 +91,7 @@ def filter_ai_enhanced_adaptive(group: pd.DataFrame, config: dict = None) -> lis
     cfg_unk_r, cfg_unk_q = config.get("UNKNOWN", (16.0, 0.25))
     cfg_ref_r, cfg_ref_q = config.get("REFUEL", (1.0, 5.0))
     cfg_slosh_r, cfg_slosh_q = config.get("SLOSHING", (1000.0, 0.001))
-    cfg_cons_r, cfg_cons_q = config.get("CONSUMPTION", (10.0, 1.0))
+    cfg_cons_r, cfg_cons_q = config.get("CONSUMPTION", (150.0, 0.05))
     cfg_drain_r, cfg_drain_q = config.get("DRAIN", (5.0, 2.0))
     cfg_stable_r, cfg_stable_q, cfg_stable_r_very = config.get("STABLE_JITTER", (50.0, 0.1, 5.0))
     cfg_spike_r, cfg_spike_q = config.get("SPIKE", (10000.0, 0.0001))
@@ -182,17 +182,21 @@ def filter_ai_enhanced_adaptive(group: pd.DataFrame, config: dict = None) -> lis
             x = float(target_val)
             R = cfg_cons_r
             Q_current = 2.0
-        elif state == "REFUEL" or (z - x) >= max(event * 0.7, 4.0):
+        elif state == "REFUEL" or (z - x) >= max(event * 0.6, 3.5):
             ok, refuel_target = _confirmed_refuel(raw, x, i, event, jitter, noise, current_speed)
             
-            # Chặn REFUEL ảo do giãn nở nhiệt/trôi cảm biến khi xe đỗ
+            # Chặn ngọn đồi ảo trôi chậm khi đỗ xe:
+            # Bơm xăng thật phải dâng NHANH (bước nhảy z - prev_z >= 3.0L hoặc 2 nhịp dâng >= 5.0L).
+            # Trôi ảo khi đỗ dâng chậm (+0.5L - 1.5L/nhịp) sẽ bị chặn ok = False.
             if ok and current_speed <= 1.0 and state != "REFUEL":
                 prev_z = float(raw[i - 1]) if i > 0 else float(z)
-                if (z - prev_z) < max(event * 0.4, 2.5):
+                prev2_z = float(raw[i - 2]) if i > 1 else prev_z
+                fast_step = (z - prev_z) >= 3.0 or (z - prev2_z) >= 5.0
+                if not fast_step:
                     ok = False
             
             if ok:
-                jump_to_z = True  # Chỉ nhảy thẳng lên khi CÓ XÁC NHẬN tương lai giữ mức cao
+                jump_to_z = True  # Nhảy thẳng và bám sát ngay lập tức khi CÓ XÁC NHẬN bơm xăng thật
                 z = refuel_target
             else:
                 # Chưa xác nhận -> Coi là sóng sánh (Sloshing/Spike), KHÔNG đẩy x lên đỉnh

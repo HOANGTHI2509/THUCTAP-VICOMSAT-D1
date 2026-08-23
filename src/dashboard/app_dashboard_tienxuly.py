@@ -429,8 +429,8 @@ with st.sidebar:
 
         st.markdown("**4. CONSUMPTION**")
         col1, col2 = st.columns(2)
-        cfg_cons_r = col1.number_input("R (CONSUMPTION)", value=3.0, step=0.5, min_value=0.1)
-        cfg_cons_q = col2.number_input("Q (CONSUMPTION)", value=2.0, step=0.1, min_value=0.0001, format="%.4f")
+        cfg_cons_r = col1.number_input("R (CONSUMPTION)", value=150.0, step=5.0, min_value=0.1)
+        cfg_cons_q = col2.number_input("Q (CONSUMPTION)", value=0.05, step=0.01, min_value=0.0001, format="%.4f")
 
         st.markdown("**5. DRAIN (Sụt giảm)**")
         col1, col2 = st.columns(2)
