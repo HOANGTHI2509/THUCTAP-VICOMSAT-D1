@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 class FuelAnomalyDetector:
-    def __init__(self, capacity: float = 200.0, look_ahead_hours: float = 6.0, min_low_minutes: float = 30.0, spike_threshold: float = 10.0, spike_lookahead_mins: float = 60.0):
+    def __init__(self, capacity: float = 200.0, look_ahead_hours: float = 6.0, min_low_minutes: float = 10.0, spike_threshold: float = 10.0, spike_lookahead_mins: float = 60.0):
         self.capacity = capacity
         self.look_ahead_hours = look_ahead_hours
         self.min_low_minutes = min_low_minutes
@@ -17,142 +17,124 @@ class FuelAnomalyDetector:
                 - FuelAnomalyType
                 - CleanedFuel
         """
-        # Đảm bảo được sắp xếp theo thời gian
-        df = df.sort_values('FuelTime').copy()
-        
-        # Mặc định
-        df['FuelAnomalyType'] = 'NORMAL'
-        df['CleanedFuel'] = df['FuelLevel'].copy()
-        
-        # Khởi tạo kích thước cửa sổ cho robust baseline
-        window_size = 10
-        
+        if df.empty or len(df) < 3:
+            res = df.copy()
+            res['FuelAnomalyType'] = 'NORMAL'
+            res['CleanedFuel'] = res['FuelLevel'].copy() if 'FuelLevel' in res.columns else np.nan
+            return res
+
+        df = df.sort_values('FuelTime', kind='stable').copy()
+        fuels = pd.to_numeric(df['FuelLevel'], errors='coerce').to_numpy(dtype=float)
+        times = pd.to_datetime(df['FuelTime']).to_numpy()
         n = len(df)
+
+        anomaly_type = np.full(n, 'NORMAL', dtype=object)
+        cleaned = fuels.copy()
+
+        drop_thresh = max(5.0, 0.025 * self.capacity)
+
         i = 0
-        
-        while i < n:
-            current_fuel = df['FuelLevel'].iloc[i]
-            
-            # Tính baseline động dựa trên CleanedFuel (những điểm đã được làm sạch)
-            if i == 0:
-                baseline = current_fuel
-            else:
-                start_b = max(0, i - window_size)
-                baseline = df['CleanedFuel'].iloc[start_b:i].median()
-                if pd.isna(baseline):
-                    baseline = current_fuel
-            
-            # Điều kiện A: Rơi cực mạnh
-            drop_threshold = max(30.0, 0.15 * self.capacity)
-            
-            if baseline - current_fuel > drop_threshold:
-                start_idx = i
-                start_time = df['FuelTime'].iloc[start_idx]
-                
-                # Quét tương lai tìm Recovery
+        while i < n - 2:
+            start_b = max(0, i - 7)
+            baseline_before = float(np.nanmedian(cleaned[start_b:i])) if i > 0 else float(fuels[i])
+            if np.isnan(baseline_before):
+                baseline_before = float(fuels[i])
+
+            # Kiểm tra sụt giảm đột ngột hoặc sụt giảm từ từ trong vòng 5 điểm
+            drop_start_idx = -1
+            for look_idx in range(i, min(n, i + 5)):
+                val_look = fuels[look_idx]
+                if not np.isnan(val_look) and (baseline_before - val_look) >= drop_thresh:
+                    drop_start_idx = i
+                    break
+
+            if drop_start_idx != -1:
+                t_start = times[drop_start_idx]
+                max_t = t_start + np.timedelta64(int(self.look_ahead_hours * 3600), 's')
+
                 recovery_idx = -1
-                max_lookahead_time = start_time + pd.Timedelta(hours=self.look_ahead_hours)
-                
-                k = i + 1
-                valley_min_fuel = current_fuel
-                
-                while k < n and df['FuelTime'].iloc[k] <= max_lookahead_time:
-                    val = df['FuelLevel'].iloc[k]
-                    valley_min_fuel = min(valley_min_fuel, val)
-                    
-                    epsilon = max(10.0, 0.05 * baseline)
-                    if abs(val - baseline) <= epsilon:
+                k = drop_start_idx + 1
+                while k < n and times[k] <= max_t:
+                    val = fuels[k]
+                    # Phục hồi sụt cảm biến CHỈ KHI mức nhiên liệu nẩy về đúng sát mức trước sụt (trong khoảng ±5.0L)
+                    # KHÔNG ĐƯỢC nối đè qua các mốc bơm xăng sau nhiều tiếng xe chạy
+                    epsilon = min(max(4.0, 0.03 * baseline_before), 5.0)
+                    if not np.isnan(val) and abs(val - baseline_before) <= epsilon:
                         recovery_idx = k
                         break
                     k += 1
-                
+
                 if recovery_idx != -1:
-                    # Tìm thấy điểm Recovery
-                    recovery_time = df['FuelTime'].iloc[recovery_idx]
-                    duration_mins = (recovery_time - start_time).total_seconds() / 60.0
-                    
-                    # Kiểm tra Điều kiện B (chạm đáy rất sâu) và C (kéo dài đủ lâu)
-                    if valley_min_fuel < 0.2 * baseline and duration_mins >= self.min_low_minutes:
-                        # ĐÂY LÀ SENSOR DROPOUT!
-                        df.iloc[start_idx:recovery_idx, df.columns.get_loc('FuelAnomalyType')] = 'SENSOR_DROPOUT'
-                        df.iloc[recovery_idx, df.columns.get_loc('FuelAnomalyType')] = 'RECOVERY'
-                        
-                        # Nội suy Trend-preserving (nối 2 baseline)
-                        # Tính baseline_after nhưng loại trừ các điểm bị rớt (nếu có dropout liên tiếp)
-                        after_window_end = min(n, recovery_idx + window_size)
-                        future_vals = df['FuelLevel'].iloc[recovery_idx:after_window_end]
-                        recovery_val = df['FuelLevel'].iloc[recovery_idx]
-                        
-                        # Chỉ lấy những điểm không bị rớt quá 30L so với điểm recovery
-                        valid_future_vals = future_vals[abs(future_vals - recovery_val) < max(30.0, 0.15 * self.capacity)]
-                        
-                        if len(valid_future_vals) > 0:
-                            baseline_after = valid_future_vals.median()
-                        else:
-                            baseline_after = recovery_val
-                            
-                        # Thay thế dữ liệu bằng nội suy
-                        total_time_diff = (recovery_time - start_time).total_seconds()
-                        if total_time_diff == 0: total_time_diff = 1 # Tránh chia 0
-                        
-                        for step in range(recovery_idx - start_idx):
-                            step_time = df['FuelTime'].iloc[start_idx + step]
-                            ratio = (step_time - start_time).total_seconds() / total_time_diff
-                            interpolated_val = baseline + ratio * (baseline_after - baseline)
-                            df.iloc[start_idx + step, df.columns.get_loc('CleanedFuel')] = interpolated_val
-                            
-                        # Nhảy đến điểm recovery để tiếp tục quét
+                    duration_mins = float((times[recovery_idx] - t_start) / np.timedelta64(1, 'm'))
+                    if duration_mins >= self.min_low_minutes:
+                        t0 = times[drop_start_idx - 1] if drop_start_idx > 0 else times[drop_start_idx]
+                        v0 = cleaned[drop_start_idx - 1] if drop_start_idx > 0 else baseline_before
+                        t1 = times[recovery_idx]
+                        v1 = fuels[recovery_idx]
+
+                        dt_total = float((t1 - t0) / np.timedelta64(1, 's'))
+                        if dt_total <= 0:
+                            dt_total = 1.0
+
+                        for idx_sub in range(drop_start_idx, recovery_idx):
+                            ratio = float((times[idx_sub] - t0) / np.timedelta64(1, 's')) / dt_total
+                            cleaned[idx_sub] = v0 + ratio * (v1 - v0)
+                            anomaly_type[idx_sub] = 'SENSOR_DROPOUT'
+
+                        anomaly_type[recovery_idx] = 'RECOVERY'
                         i = recovery_idx
                         continue
-                
-                # Nếu không phải dropout hợp lệ (không đủ sâu, không đủ lâu, hoặc không có recovery)
-                pass # Chuyển sang check Spike bên dưới
-                
+            
             # Điều kiện E: Phát hiện SPIKE (Nhiễu lồi/lõm ngắn hạn)
             # Nếu chênh lệch > spike_threshold (e.g. 10L) và quay về baseline trong vòng 1 giờ
-            if abs(current_fuel - baseline) > self.spike_threshold:
+            if abs(fuels[i] - baseline_before) > self.spike_threshold:
                 start_idx = i
-                start_time = df['FuelTime'].iloc[start_idx]
+                start_time = times[start_idx]
                 
                 recovery_idx = -1
-                max_spike_time = start_time + pd.Timedelta(minutes=self.spike_lookahead_mins)
+                max_spike_time = start_time + np.timedelta64(int(self.spike_lookahead_mins * 60), 's')
                 k = i + 1
                 
-                while k < n and df['FuelTime'].iloc[k] <= max_spike_time:
-                    val = df['FuelLevel'].iloc[k]
-                    epsilon = max(3.0, 0.01 * baseline) # Ngưỡng phục hồi khắt khe hơn cho spike (phải về sát baseline)
-                    if abs(val - baseline) <= epsilon:
+                while k < n and times[k] <= max_spike_time:
+                    val = fuels[k]
+                    epsilon = max(3.0, 0.01 * baseline_before) # Ngưỡng phục hồi khắt khe hơn cho spike (phải về sát baseline)
+                    if not np.isnan(val) and abs(val - baseline_before) <= epsilon:
                         recovery_idx = k
                         break
                     k += 1
                 
                 if recovery_idx != -1:
                     # Là SPIKE!
-                    df.iloc[start_idx:recovery_idx, df.columns.get_loc('FuelAnomalyType')] = 'SPIKE'
-                    
-                    # Nội suy thẳng qua Spike
+                    window_size = 5
                     after_window_end = min(n, recovery_idx + window_size)
-                    future_vals = df['FuelLevel'].iloc[recovery_idx:after_window_end]
-                    recovery_val = df['FuelLevel'].iloc[recovery_idx]
-                    valid_future_vals = future_vals[abs(future_vals - recovery_val) < self.spike_threshold]
                     
-                    if len(valid_future_vals) > 0:
-                        baseline_after = valid_future_vals.median()
+                    valid_future = []
+                    recovery_val = fuels[recovery_idx]
+                    for future_k in range(recovery_idx, after_window_end):
+                        if not np.isnan(fuels[future_k]) and abs(fuels[future_k] - recovery_val) < self.spike_threshold:
+                            valid_future.append(fuels[future_k])
+                    
+                    if len(valid_future) > 0:
+                        baseline_after = np.median(valid_future)
                     else:
                         baseline_after = recovery_val
                         
-                    total_time_diff = (df['FuelTime'].iloc[recovery_idx] - start_time).total_seconds()
-                    if total_time_diff == 0: total_time_diff = 1
+                    total_time_diff = float((times[recovery_idx] - start_time) / np.timedelta64(1, 's'))
+                    if total_time_diff <= 0: 
+                        total_time_diff = 1.0
                     
-                    for step in range(recovery_idx - start_idx):
-                        step_time = df['FuelTime'].iloc[start_idx + step]
-                        ratio = (step_time - start_time).total_seconds() / total_time_diff
-                        interpolated_val = baseline + ratio * (baseline_after - baseline)
-                        df.iloc[start_idx + step, df.columns.get_loc('CleanedFuel')] = interpolated_val
+                    for step in range(start_idx, recovery_idx):
+                        ratio = float((times[step] - start_time) / np.timedelta64(1, 's')) / total_time_diff
+                        interpolated_val = baseline_before + ratio * (baseline_after - baseline_before)
+                        cleaned[step] = interpolated_val
+                        anomaly_type[step] = 'SPIKE'
                         
+                    anomaly_type[recovery_idx] = 'RECOVERY'
                     i = recovery_idx
                     continue
                     
             i += 1
                 
+        df['FuelAnomalyType'] = anomaly_type
+        df['CleanedFuel'] = cleaned
         return df

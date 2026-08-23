@@ -66,7 +66,16 @@ def filter_ai_enhanced_adaptive(group: pd.DataFrame, config: dict = None) -> lis
     if group.empty:
         return []
 
-    raw = _numeric_array(group, "FuelLevel", np.nan)
+    if "CleanedFuel" in group.columns:
+        source_col = "CleanedFuel"
+    elif "ShapeCleanFuel" in group.columns:
+        source_col = "ShapeCleanFuel"
+    elif "ProfileCleanFuel" in group.columns:
+        source_col = "ProfileCleanFuel"
+    else:
+        source_col = "FuelLevel"
+
+    raw = _numeric_array(group, source_col, np.nan)
     states = _series_or_default(group, "AI_State", "UNKNOWN")
     jitter_values = _numeric_array(group, "flat_jitter_threshold", 0.8)
     noise_values = _numeric_array(group, "noise_sigma_liters", 0.8)
@@ -123,8 +132,8 @@ def filter_ai_enhanced_adaptive(group: pd.DataFrame, config: dict = None) -> lis
         else:
             drop_count = 0
 
-        # Nếu bị sụt 1-2 nhịp rồi nảy lại (nghi do AI dán sai nhãn) -> Giữ nguyên x, không tụt theo chữ U
-        if drop_count > 0 and drop_count < 3 and state != "DRAIN":
+        # Chỉ đóng băng 1 nhịp nếu x không bị trệch cao quá jitter và nhãn là nhiễu rung nhỏ
+        if drop_count == 1 and (x - z) <= jitter * 1.5 and state in {"STABLE_JITTER", "SLOSHING_NOISE"}:
             enhanced[i] = x
             continue
 
@@ -134,49 +143,63 @@ def filter_ai_enhanced_adaptive(group: pd.DataFrame, config: dict = None) -> lis
         else:
             drain_count = 0
 
-        # Mặc định: bám khá nhanh (tracking bình thường, không làm mượt thái quá)
+        # Mặc định: bám khá nhanh
         R = cfg_unk_r
         Q_current = cfg_unk_q
         jump_to_z = False
 
         # 2. Xác định Q và R
         is_spike = (state == "SPIKE") or _looks_like_up_spike(raw, x, i, jitter, noise)
-        gate = max(event * 0.45, jitter * 3.0, noise * 2.5, 1.5)
         
-        # Cơ chế Gọt Đỉnh Ảo (Trap Recovery): Chỉ kích hoạt khi x bị treo lơ lửng quá cao (>12L) do nhảy nhầm REFUEL
+        # Cơ chế Giải phóng Bẫy Treo (Trap Recovery): Xả ngay khi x bị treo cao hơn z và tương lai đã hạ xuống
         future, count = _future_median(raw, i, width=3)
-        trap_recovery = (x - z >= max(event * 2.0, 12.0)) and (count > 0) and (future <= x - 8.0)
+        trap_recovery = (
+            (x - z >= max(event * 0.5, jitter * 2.5, 3.0))
+            and (count > 0)
+            and (future <= x - max(jitter * 1.5, 2.0))
+        )
 
         if is_spike:
             R = cfg_spike_r
             Q_current = cfg_spike_q
         elif trap_recovery:
-            # Gọt khối lơ lửng cực đại do nhảy nhầm REFUEL
-            x = float(z)
-            R = cfg_drain_r
-            Q_current = 5.0
-        elif state == "REFUEL" or (z - x) >= max(event, 8.0):
+            # Xóa ngay bẫy lơ lửng do nhô lên nhầm cũ, kéo x về mức thực tế
+            target_val = future if count > 0 else float(z)
+            x = float(target_val)
+            R = cfg_cons_r
+            Q_current = 2.0
+        elif state == "REFUEL" or (z - x) >= max(event * 0.7, 4.0):
             ok, refuel_target = _confirmed_refuel(raw, x, i, event, jitter, noise, current_speed)
+            
+            # Chặn REFUEL ảo do giãn nở nhiệt/trôi cảm biến khi xe đỗ
+            if ok and current_speed <= 1.0 and state != "REFUEL":
+                prev_z = float(raw[i - 1]) if i > 0 else float(z)
+                if (z - prev_z) < max(event * 0.4, 2.5):
+                    ok = False
+            
             if ok:
-                jump_to_z = True  # Nhảy thẳng lên giống Adaptive Kalman
+                jump_to_z = True  # Chỉ nhảy thẳng lên khi CÓ XÁC NHẬN tương lai giữ mức cao
                 z = refuel_target
-            elif state == "REFUEL":
-                R = cfg_ref_r
-                Q_current = cfg_ref_q  # Dù chưa confirm vẫn bám rất nhanh
+            else:
+                # Chưa xác nhận -> Coi là sóng sánh (Sloshing/Spike), KHÔNG đẩy x lên đỉnh
+                R = cfg_slosh_r
+                Q_current = cfg_slosh_q
         elif drain_count >= 2:
             # Tụt liên tục -> Bám sát
             R = cfg_drain_r
             Q_current = cfg_drain_q
         elif state == "SLOSHING_NOISE" or high_noise:
-            # CHỈ làm mượt tuyệt đối khi thật sự nhiễu mạnh
             R = cfg_slosh_r
             Q_current = cfg_slosh_q
         elif state == "CONSUMPTION":
-            # Đang tiêu hao -> mượt vừa phải, giữ nguyên form dốc xuống
-            R = cfg_cons_r
-            Q_current = cfg_cons_q
+            if x - z > max(jitter * 1.2, 1.5):
+                # Dốc sụt tiêu hao rõ ràng -> Hạ R nhanh để bám sát dữ liệu sụt ngay tức thì như Adaptive Kalman
+                R = max(1.0, cfg_cons_r / 5.0)
+                Q_current = max(Q_current, 2.0)
+            else:
+                R = cfg_cons_r
+                Q_current = cfg_cons_q
         elif state == "STABLE_JITTER" and current_speed <= 1.0:
-            # Đang đỗ xe -> bám nhẹ để giữ đường thẳng
             very_stable = float(rolling_std[i]) <= max(jitter * 0.8, 1.0)
             if very_stable:
                 R = cfg_stable_r_very
@@ -184,6 +207,17 @@ def filter_ai_enhanced_adaptive(group: pd.DataFrame, config: dict = None) -> lis
             else:
                 R = cfg_stable_r
                 Q_current = cfg_stable_q
+
+        # Thích nghi R tự động 2 chiều (khi đường lọc trệch phía trên HOẶC phía dưới dữ liệu)
+        if not is_spike and not jump_to_z:
+            if z < x - jitter:
+                lag_ratio = max(1.0, (x - z) / jitter)
+                R = max(1.0, R / (lag_ratio ** 1.5))
+            elif z > x + jitter and (state == "REFUEL" or (z - x >= 4.0 and current_speed > 1.0)):
+                # CHỈ tăng tốc bám lên khi có xác nhận REFUEL hoặc vọt lớn z - x >= 4.0 khi di chuyển.
+                # Chặn hoàn toàn trôi ngược khi xe chạy cao tốc tiêu thụ nhiên liệu.
+                lag_ratio = max(1.0, (z - x) / jitter)
+                R = max(1.0, R / (lag_ratio ** 1.5))
 
         # 3. Update Step
         if jump_to_z:

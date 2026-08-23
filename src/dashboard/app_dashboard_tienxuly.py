@@ -424,13 +424,13 @@ with st.sidebar:
 
         st.markdown("**3. SLOSHING_NOISE**")
         col1, col2 = st.columns(2)
-        cfg_slosh_r = col1.number_input("R (SLOSHING)", value=1000.0, step=10.0, min_value=1.0)
-        cfg_slosh_q = col2.number_input("Q (SLOSHING)", value=0.001, step=0.001, min_value=0.0001, format="%.4f")
+        cfg_slosh_r = col1.number_input("R (SLOSHING)", value=100.0, step=10.0, min_value=1.0)
+        cfg_slosh_q = col2.number_input("Q (SLOSHING)", value=0.005, step=0.001, min_value=0.0001, format="%.4f")
 
         st.markdown("**4. CONSUMPTION**")
         col1, col2 = st.columns(2)
-        cfg_cons_r = col1.number_input("R (CONSUMPTION)", value=10.0, step=1.0, min_value=0.1)
-        cfg_cons_q = col2.number_input("Q (CONSUMPTION)", value=1.0, step=0.01, min_value=0.0001, format="%.4f")
+        cfg_cons_r = col1.number_input("R (CONSUMPTION)", value=3.0, step=0.5, min_value=0.1)
+        cfg_cons_q = col2.number_input("Q (CONSUMPTION)", value=2.0, step=0.1, min_value=0.0001, format="%.4f")
 
         st.markdown("**5. DRAIN (Sụt giảm)**")
         col1, col2 = st.columns(2)
@@ -439,8 +439,8 @@ with st.sidebar:
 
         st.markdown("**6. STABLE_JITTER**")
         col1, col2 = st.columns(2)
-        cfg_stable_r = col1.number_input("R (STABLE)", value=50.0, step=1.0, min_value=0.1)
-        cfg_stable_q = col2.number_input("Q (STABLE)", value=0.1, step=0.01, min_value=0.0001, format="%.4f")
+        cfg_stable_r = col1.number_input("R (STABLE)", value=15.0, step=1.0, min_value=0.1)
+        cfg_stable_q = col2.number_input("Q (STABLE)", value=0.2, step=0.01, min_value=0.0001, format="%.4f")
         cfg_stable_r_very = col1.number_input("R (STABLE RẤT ÊM)", value=5.0, step=1.0, min_value=0.1)
 
         st.markdown("**7. SPIKE (Nhiễu gai)**")
@@ -466,6 +466,12 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
     df_seg['FuelLevel_Filtered_EMA'] = np.nan
     df_seg['FuelLevel_Filtered_Edge'] = np.nan
     df_seg['FuelLevel_Filtered_AlphaBeta'] = np.nan
+    
+    anomaly_detector = FuelAnomalyDetector(capacity=estimated_capacity)
+    df_seg = (
+        df_seg.groupby("SegmentID", sort=False, dropna=False, group_keys=False)
+        .apply(lambda g: anomaly_detector.detect_and_clean(g))
+    )
     
     if "Acceleration" not in df_seg.columns:
         if "Speed" in df_seg.columns:
@@ -540,7 +546,9 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         df_seg["AI_State_Filtered"] = np.nan
 
     for seg_id, group in df_seg.groupby('SegmentID', sort=False, dropna=False):
-        if "ShapeCleanFuel" in group.columns:
+        if "CleanedFuel" in group.columns:
+            adaptive_source_col = "CleanedFuel"
+        elif "ShapeCleanFuel" in group.columns:
             adaptive_source_col = "ShapeCleanFuel"
         elif "ProfileCleanFuel" in group.columns:
             adaptive_source_col = "ProfileCleanFuel"
@@ -784,7 +792,12 @@ for seg_id, group in df_seg.groupby('SegmentID', sort=False):
         fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Median_Filter'],
                                  mode='lines', name='Median Filter (N=10)',
                                  legendgroup='median_filter', showlegend=show_legend,
-                                 line=dict(color='#FF1493', width=2.0), connectgaps=True),
+                                 line=dict(color='#FF1493', width=2.0), connectgaps=True), row=1, col=1, secondary_y=False)
+    if 'CleanedFuel' in group.columns:
+        fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['CleanedFuel'],
+                                 mode='lines', name='Cleaned & Interpolated (Nối phẳng mượt Chữ U)',
+                                 legendgroup='cleaned_fuel', showlegend=show_legend,
+                                 line=dict(color='#008080', width=2.5, dash='solid'), connectgaps=True),
                       row=1, col=1, secondary_y=False)
 
     if show_experimental_debug_traces and 'AI_State' in group.columns:
@@ -860,4 +873,10 @@ fig.update_traces(
 
 st.plotly_chart(fig, width='stretch')
 
-st.info("💡 **Hướng dẫn:** Các thuật toán Moving Average và Median Filter hiện đã được cập nhật logic an toàn (Reset khi mất sóng) và loại bỏ khoảng Burn-in (Chỉ vẽ đường thẳng khi đã gom đủ dữ liệu). Hãy thử kéo thanh trượt N để thấy sự khác biệt!")
+with st.expander("🔍 Soi Chi tiết Nhãn AI từng mốc thời gian (Data Inspector)", expanded=True):
+    st.markdown("Bảng tra cứu nhãn do Random Forest dự đoán trên từng điểm dữ liệu của phân đoạn đang chọn:")
+    cols_to_show = ['FuelTime', 'FuelLevel', 'Speed', 'AI_State', 'AI_State_Raw', 'AI_State_Confidence', 'QualityReason']
+    cols_to_show = [c for c in cols_to_show if c in df_seg.columns]
+    st.dataframe(df_seg[cols_to_show], height=350, use_container_width=True)
+
+st.info("💡 **Hướng dẫn:** Các thuật toán lọc thích nghi và AI hiện đã được đồng bộ nguồn dữ liệu làm phẳng sóng nhiễu transient. Sử dụng bảng Data Inspector ở trên để kiểm tra chính xác nhãn AI do mô hình Random Forest phân loại trên từng mốc thời gian!")

@@ -192,18 +192,35 @@ def _postprocess_ai_state(df: pd.DataFrame, mode: str = "offline") -> pd.DataFra
                 continue
             next_fuels = [float(result.loc[next_idx, "FuelLevel"]) for next_idx in next_indices]
             future_median = float(np.median(next_fuels))
-            drop_is_large = delta <= -max(spike, event * 0.7)
-            recovers_quickly = abs(future_median - prev_fuel) <= max(flat * 2.0, abs(delta) * 0.30)
+            drop_is_large = delta <= -max(spike * 0.8, event * 0.5, 3.5)
+            jump_is_large = delta >= max(spike * 0.8, event * 0.5, 3.5)
+            recovers_quickly = abs(future_median - prev_fuel) <= max(flat * 2.5, abs(delta) * 0.35, 3.0)
             single_point_low = min(next_fuels) > fuel + max(flat, abs(delta) * 0.25)
+            single_point_high = max(next_fuels) < fuel - max(flat, abs(delta) * 0.25)
+
+            # Sụt 1 điểm rồi phục hồi (Chữ U / Spike down)
             if drop_is_large and (recovers_quickly or single_point_low):
                 result.loc[idx, "AI_State"] = "SPIKE"
                 continue
+
+            # Nhô vọt 1 điểm rồi rơi lại (Quả đồi 1 điểm / Spike up)
+            if jump_is_large and (recovers_quickly or single_point_high):
+                result.loc[idx, "AI_State"] = "SPIKE"
+                continue
+
             if row.get("AI_State") == "DRAIN":
                 near_low_count = sum(
                     1 for next_fuel in next_fuels if abs(next_fuel - fuel) <= max(flat * 2.0, abs(delta) * 0.25)
                 )
                 if near_low_count < 2:
                     result.loc[idx, "AI_State"] = "SPIKE"
+
+            # Khắc phục nhãn SLOSHING_NOISE nhầm khi xe đang chạy cao tốc tiêu thụ nhiên liệu
+            speed_val = float(row.get("Speed", 0.0) or 0.0)
+            if speed_val > 10.0 and row.get("AI_State") == "SLOSHING_NOISE":
+                if fuel <= prev_fuel + 0.8 and future_median <= fuel + 1.5:
+                    result.loc[idx, "AI_State"] = "CONSUMPTION"
+
     return result
 
 
