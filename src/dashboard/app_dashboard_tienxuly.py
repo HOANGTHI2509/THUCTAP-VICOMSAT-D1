@@ -17,6 +17,7 @@ from src.core.filters import kalman_adaptive
 from src.core.filters.median_filter import apply_median_filter
 BoLocKalmanThichNghi1D = kalman_adaptive.BoLocKalmanThichNghi1D
 from src.core.filters.ai_enhanced_adaptive import filter_ai_enhanced_adaptive
+from src.core.filters.ai_enhanced_adaptive_realtime import filter_ai_enhanced_adaptive_realtime
 is_valid_measurement = kalman_adaptive.is_valid_measurement
 classify_signal_modes = getattr(kalman_adaptive, "classify_signal_modes", None)
 
@@ -463,6 +464,7 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
     df_seg['Custom_Kalman'] = np.nan
     df_seg['Custom_Adaptive_Kalman'] = np.nan
     df_seg['AI_Enhanced_Kalman'] = np.nan
+    df_seg['AI_Enhanced_Kalman_Realtime'] = np.nan
     df_seg['Median_Filter'] = np.nan
     df_seg['FuelLevel_Filtered_EMA'] = np.nan
     df_seg['FuelLevel_Filtered_Edge'] = np.nan
@@ -685,6 +687,7 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         
         df_seg_subset = df_seg.loc[group.index]
         df_seg.loc[group.index, 'AI_Enhanced_Kalman'] = filter_ai_enhanced_adaptive(df_seg_subset, config=ai_kalman_config)
+        df_seg.loc[group.index, 'AI_Enhanced_Kalman_Realtime'] = filter_ai_enhanced_adaptive_realtime(df_seg_subset, config=ai_kalman_config)
         df_seg.loc[group.index, 'Median_Filter'] = apply_median_filter(df_seg_subset, window_size=10)
         
         if 'AI_State_Filtered' in df_seg.columns:
@@ -784,9 +787,16 @@ for seg_id, group in df_seg.groupby('SegmentID', sort=False):
 
     if 'AI_Enhanced_Kalman' in group.columns:
         fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['AI_Enhanced_Kalman'],
-                                 mode='lines', name='AI-Enhanced Adaptive Kalman',
+                                 mode='lines', name='AI-Enhanced Adaptive Kalman (Offline)',
                                  legendgroup='ai_enhanced_kalman', showlegend=show_legend,
                                  line=dict(color='#8A2BE2', width=2.5), connectgaps=True),
+                      row=1, col=1, secondary_y=False)
+
+    if 'AI_Enhanced_Kalman_Realtime' in group.columns:
+        fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['AI_Enhanced_Kalman_Realtime'],
+                                 mode='lines', name='AI-Enhanced Kalman (Realtime / Causal)',
+                                 legendgroup='ai_enhanced_kalman_realtime', showlegend=show_legend,
+                                 line=dict(color='#FF7F0E', width=2.5), connectgaps=True),
                       row=1, col=1, secondary_y=False)
 
     if 'Median_Filter' in group.columns:
