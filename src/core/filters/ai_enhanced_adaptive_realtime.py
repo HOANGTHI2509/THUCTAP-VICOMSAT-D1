@@ -32,6 +32,10 @@ class RealtimeAdaptiveKalmanState:
     previous_raw_2: float | None = None
     segment_id: str | None = None
     fuel_time: str | None = None
+    # Pending-drain state. A deep fall starts here and is promoted only after
+    # causal confirmation; values near zero are never promoted to DRAIN.
+    dropout_anchor: float | None = None
+    dropout_count: int = 0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -58,6 +62,8 @@ def _reset_state(state: RealtimeAdaptiveKalmanState) -> None:
     state.recent_refuel_steps = 0
     state.previous_raw = None
     state.previous_raw_2 = None
+    state.dropout_anchor = None
+    state.dropout_count = 0
 
 
 def filter_ai_enhanced_adaptive_realtime(
@@ -102,6 +108,7 @@ def filter_ai_enhanced_adaptive_realtime(
     quality_reasons = _series_or_default(group, "QualityReason", "")
     confidence_values = _numeric_array(group, "AI_State_Confidence", 0.0)
     capacity_values = _numeric_array(group, "capacity_est", 200.0)
+    observed_fuel = _numeric_array(group, "FuelLevel", np.nan)
     segment_values = _series_or_default(group, "SegmentID", "")
     time_values = group["FuelTime"].to_numpy() if "FuelTime" in group.columns else np.full(len(group), None)
 
@@ -112,6 +119,12 @@ def filter_ai_enhanced_adaptive_realtime(
     stream_state = state or RealtimeAdaptiveKalmanState()
     reset_gap_minutes = float(config.get("reset_gap_minutes", 120.0))
     refuel_confidence = float(config.get("refuel_min_confidence", 0.55))
+    dropout_recovery_ratio = float(config.get("dropout_recovery_ratio", 0.70))
+    max_dropout_hold_points = int(config.get("max_dropout_hold_points", 120))
+    drain_confirm_points = int(config.get("drain_confirm_points", 3))
+    drain_hard_confirm_points = int(config.get("drain_hard_confirm_points", 5))
+    drain_min_confidence = float(config.get("drain_min_confidence", 0.55))
+    drain_max_gap_minutes = float(config.get("drain_max_gap_minutes", 30.0))
 
     cfg_unk_r, cfg_unk_q = config.get("UNKNOWN", (25.0, 0.15))
     cfg_ref_r, cfg_ref_q = config.get("REFUEL", (1.0, 5.0))
@@ -131,6 +144,9 @@ def filter_ai_enhanced_adaptive_realtime(
     recent_refuel_steps = int(stream_state.recent_refuel_steps)
     previous_raw = np.nan if stream_state.previous_raw is None else float(stream_state.previous_raw)
     previous_raw_2 = np.nan if stream_state.previous_raw_2 is None else float(stream_state.previous_raw_2)
+    dropout_anchor = np.nan if stream_state.dropout_anchor is None else float(stream_state.dropout_anchor)
+    dropout_count = int(stream_state.dropout_count)
+    last_seen_time = _as_timestamp(stream_state.fuel_time)
 
     for i in range(len(group)):
         z = raw[i]
@@ -138,14 +154,18 @@ def filter_ai_enhanced_adaptive_realtime(
         qreason = str(quality_reasons[i]).upper()
         current_segment = str(segment_values[i]) or None
         current_time = _as_timestamp(time_values[i])
-        previous_time = _as_timestamp(stream_state.fuel_time)
+        previous_time = last_seen_time
         gap_minutes = (current_time - previous_time).total_seconds() / 60.0 if current_time is not None and previous_time is not None else 0.0
+        if current_time is not None:
+            last_seen_time = current_time
         segment_changed = stream_state.segment_id is not None and current_segment is not None and current_segment != stream_state.segment_id
         if segment_changed or gap_minutes > reset_gap_minutes:
             _reset_state(stream_state)
             x, P, last_valid_x = np.nan, 4.0, np.nan
             drain_count = drop_count = rise_count = recent_refuel_steps = 0
             previous_raw = previous_raw_2 = np.nan
+            dropout_anchor = np.nan
+            dropout_count = 0
 
         is_qflag_zero = (
             any(reason in qreason for reason in {"FUEL_ZERO", "SENSOR_DROPOUT", "DROPOUT"})
@@ -159,22 +179,61 @@ def filter_ai_enhanced_adaptive_realtime(
         event = max(float(event_values[i]), jitter * 5.0, noise * 4.0, 2.0)
         current_speed = max(float(speed[i]), 0.0)
         high_noise = float(rolling_std[i]) >= max(jitter * 1.5, noise * 3.0)
+        observed = observed_fuel[i] if not pd.isna(observed_fuel[i]) else z
+
+        # PENDING_DRAIN: a deep fall is held at its physical baseline first.
+        # It becomes DRAIN only after consecutive low readings under normal
+        # sampling; values near zero are treated as a sensor dropout forever.
+        drain_confirmed_now = False
+        if not pd.isna(dropout_anchor):
+            if observed >= dropout_anchor * dropout_recovery_ratio:
+                # Returned near the pre-drop level: this was a sensor fault.
+                dropout_anchor = np.nan
+                dropout_count = 0
+            elif observed <= dropout_anchor * dropout_recovery_ratio:
+                normal_gap = 0.0 <= gap_minutes <= drain_max_gap_minutes
+                if normal_gap:
+                    dropout_count += 1
+                model_supports_drain = ai_state == "DRAIN" and float(confidence_values[i]) >= drain_min_confidence
+                can_confirm_drain = (
+                    observed > 5.0
+                    and (
+                        (model_supports_drain and dropout_count >= drain_confirm_points)
+                        or dropout_count >= drain_hard_confirm_points
+                    )
+                )
+                if can_confirm_drain:
+                    drain_confirmed_now = True
+                    dropout_anchor = np.nan
+                    dropout_count = 0
+                else:
+                    enhanced[i] = dropout_anchor
+                    continue
+            else:
+                dropout_anchor = np.nan
+                dropout_count = 0
 
         # 1. Nhận diện Lỗi cảm biến mất tín hiệu / rơi về 0 / hố sụt
-        is_zero_dropout = (
+        is_zero_dropout = not drain_confirmed_now and (
             pd.isna(z)
             or is_qflag_zero
-            or (z <= 5.0 and not pd.isna(last_valid_x) and last_valid_x >= 15.0)
-            or (not pd.isna(last_valid_x) and z <= 0.40 * last_valid_x and last_valid_x >= 20.0 and ai_state != "DRAIN")
-            or (not pd.isna(last_valid_x) and (last_valid_x - z) >= max(event * 1.5, 30.0) and ai_state not in {"DRAIN", "CONSUMPTION"} and drain_count < 2)
+            or (observed <= 5.0 and not pd.isna(last_valid_x) and last_valid_x >= 15.0)
+            or (not pd.isna(last_valid_x) and observed <= 0.40 * last_valid_x and last_valid_x >= 20.0)
+            or (not pd.isna(last_valid_x) and (last_valid_x - observed) >= max(event * 1.5, 30.0) and observed <= 0.55 * last_valid_x)
         )
 
         if is_zero_dropout:
             if not pd.isna(last_valid_x) and last_valid_x > 3.0:
+                dropout_anchor = last_valid_x
+                dropout_count = 1
                 enhanced[i] = last_valid_x  # Giữ phẳng tuyệt đối mức hợp lệ trước đó
                 continue
             elif pd.isna(z) or z <= 0:
-                enhanced[i] = x if not pd.isna(x) else 0.0
+                # A slice can begin inside a dropout and therefore has no
+                # historical state. Never manufacture a false 0L level: emit
+                # a gap until the service restores the vehicle state or a
+                # valid measurement arrives.
+                enhanced[i] = x if not pd.isna(x) else np.nan
                 continue
 
         # Khởi tạo điểm hợp lệ đầu tiên
@@ -211,7 +270,10 @@ def filter_ai_enhanced_adaptive_realtime(
         else:
             drop_count = 0
 
-        if ai_state == "DRAIN":
+        if drain_confirmed_now:
+            ai_state = "DRAIN"
+            drain_count = max(drain_count, 2)
+        elif ai_state == "DRAIN":
             drain_count += 1
         else:
             drain_count = 0
@@ -346,6 +408,8 @@ def filter_ai_enhanced_adaptive_realtime(
     stream_state.recent_refuel_steps = recent_refuel_steps
     stream_state.previous_raw = None if pd.isna(previous_raw) else float(previous_raw)
     stream_state.previous_raw_2 = None if pd.isna(previous_raw_2) else float(previous_raw_2)
+    stream_state.dropout_anchor = None if pd.isna(dropout_anchor) else float(dropout_anchor)
+    stream_state.dropout_count = dropout_count
     if len(group):
         stream_state.segment_id = str(segment_values[-1]) or None
         last_time = _as_timestamp(time_values[-1])

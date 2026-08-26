@@ -334,6 +334,9 @@ with st.sidebar:
     
 df = load_data(selected_car)
 vehicle_profile = load_vehicle_profile(selected_car, df)
+# Keep the unfiltered rows for causal-filter burn-in.  The date picker below
+# controls what is displayed, not the state history needed to process it.
+df_all = df.copy()
 
 min_date = df['FuelTime'].min().date()
 max_date = df['FuelTime'].max().date()
@@ -381,9 +384,33 @@ with st.sidebar:
     selected_segment = st.selectbox("Hiển thị theo phân đoạn", segment_options)
 
 if selected_segment == "Toàn bộ dữ liệu trong khoảng thời gian (All)":
-    df_seg = df.copy()
+    df_visible = df.copy()
 else:
-    df_seg = df[df['SegmentID'] == selected_segment].copy()
+    df_visible = df[df['SegmentID'] == selected_segment].copy()
+
+# A realtime filter must be warmed up with points before the selected range.
+# Keep a bounded history per segment: processing the vehicle's *entire*
+# history here makes every dashboard interaction unnecessarily expensive.
+# The final valid point is also retained when a dropout began more than the
+# burn-in window ago, so a 0L window still has a level to hold.
+display_indices = df_visible.index
+visible_segment_ids = df_visible['SegmentID'].dropna().unique()
+display_start_time = df_visible['FuelTime'].min()
+df_history = df_all[
+    df_all['SegmentID'].isin(visible_segment_ids)
+    & (df_all['FuelTime'] < display_start_time)
+].copy()
+df_history = df_history.sort_values(['SegmentID', 'FuelTime'], kind='stable')
+burn_in_rows = 120
+burn_in_tail = df_history.groupby('SegmentID', sort=False, dropna=False).tail(burn_in_rows)
+burn_in_last_valid = (
+    df_history[pd.to_numeric(df_history['FuelLevel'], errors='coerce') > 5.0]
+    .groupby('SegmentID', sort=False, dropna=False)
+    .tail(1)
+)
+df_burn_in = pd.concat([burn_in_tail, burn_in_last_valid]).loc[lambda frame: ~frame.index.duplicated(keep='last')]
+df_seg = pd.concat([df_burn_in, df_visible]).sort_values(['SegmentID', 'FuelTime'], kind='stable').copy()
+df_seg['_DisplayRow'] = df_seg.index.isin(display_indices)
 
 df_seg["_OriginalOrder"] = np.arange(len(df_seg))
 df_seg = df_seg.sort_values(["SegmentID", "FuelTime", "_OriginalOrder"], kind="stable")
@@ -694,6 +721,8 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
             pass  # Giữ nguyên bản gốc để backup
 # Restore original order just in case
 df_seg = df_seg.sort_values("_OriginalOrder", kind="stable").drop(columns="_OriginalOrder")
+# Hide burn-in context after every derived column has been calculated.
+df_seg = df_seg[df_seg['_DisplayRow']].copy().drop(columns="_DisplayRow")
 
 # Metric cards
 st.markdown("### 📊 Thông số phân đoạn hiện tại")
