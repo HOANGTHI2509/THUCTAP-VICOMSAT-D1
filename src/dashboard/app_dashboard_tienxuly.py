@@ -62,15 +62,14 @@ def clean_transient_shapes(
         return group
 
     capacity = float(getattr(vehicle_profile, "capacity_est", np.nan))
+    profile = vehicle_profile
+    capacity = float(getattr(profile, "capacity_est", np.nan))
     if pd.isna(capacity) or capacity <= 0:
         valid = raw[(~np.isnan(raw)) & (raw > 0)]
         capacity = float(np.nanquantile(valid, 0.995)) if len(valid) else 200.0
-    flat = float(getattr(vehicle_profile, "flat_jitter_threshold", max(0.8, 0.003 * capacity)))
-    spike = float(getattr(vehicle_profile, "spike_threshold", max(3.0, 0.012 * capacity)))
-    event = float(getattr(vehicle_profile, "event_threshold", max(6.0, 0.035 * capacity)))
-    flat = max(flat, 0.5)
-    spike_gate = max(spike, flat * 4.0, 2.5)
-    return_gate = max(flat * 2.5, spike_gate * 0.35, 2.0)
+    flat = float(profile.flat_jitter_threshold) if profile is not None else 0.8
+    spike_gate = float(profile.spike_threshold) if profile is not None else 3.0
+    return_gate = max(spike_gate * 1.0, flat * 2.5, 3.5)
     max_points = max(3, int(max_points))
 
     # One-point spike: neighbors agree, center is far away.
@@ -98,7 +97,8 @@ def clean_transient_shapes(
 
         baseline = float(np.median(prev_window))
         first_delta = clean[i] - baseline
-        if abs(first_delta) < return_gate:
+        # CHỈ xử lý HỐ SỤT CHỮ U (first_delta < -return_gate), TUYỆT ĐỐI KHÔNG can thiệp vào nạp nhiên liệu
+        if first_delta > -return_gate:
             i += 1
             continue
 
@@ -139,6 +139,7 @@ def clean_transient_shapes(
             max_speed > 8.0
             or max_rolling >= max(flat * 1.6, spike_gate * 0.45)
             or span_direction_changes >= 2
+            or max_speed <= 1.0
         )
 
         # Do not erase real refuel/drain: only short excursions returning to old level.
@@ -429,8 +430,8 @@ with st.sidebar:
 
         st.markdown("**4. CONSUMPTION**")
         col1, col2 = st.columns(2)
-        cfg_cons_r = col1.number_input("R (CONSUMPTION)", value=150.0, step=5.0, min_value=0.1)
-        cfg_cons_q = col2.number_input("Q (CONSUMPTION)", value=0.05, step=0.01, min_value=0.0001, format="%.4f")
+        cfg_cons_r = col1.number_input("R (CONSUMPTION)", value=30.0, step=5.0, min_value=0.1)
+        cfg_cons_q = col2.number_input("Q (CONSUMPTION)", value=0.20, step=0.01, min_value=0.0001, format="%.4f")
 
         st.markdown("**5. DRAIN (Sụt giảm)**")
         col1, col2 = st.columns(2)
@@ -518,7 +519,7 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
                 source_col="FuelLevel",
                 output_col="ShapeCleanFuel",
                 flag_col="ShapeCleanFlag",
-                max_points=12,
+                max_points=50,
             )
         )
     )
@@ -792,12 +793,14 @@ for seg_id, group in df_seg.groupby('SegmentID', sort=False):
         fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['Median_Filter'],
                                  mode='lines', name='Median Filter (N=10)',
                                  legendgroup='median_filter', showlegend=show_legend,
-                                 line=dict(color='#FF1493', width=2.0), connectgaps=True), row=1, col=1, secondary_y=False)
+                                 line=dict(color='#FF1493', width=2.0), connectgaps=True,
+                                 visible='legendonly'), row=1, col=1, secondary_y=False)
     if 'CleanedFuel' in group.columns:
         fig.add_trace(go.Scatter(x=group['FuelTime'], y=group['CleanedFuel'],
                                  mode='lines', name='Cleaned & Interpolated (Nối phẳng mượt Chữ U)',
                                  legendgroup='cleaned_fuel', showlegend=show_legend,
-                                 line=dict(color='#008080', width=2.5, dash='solid'), connectgaps=True),
+                                 line=dict(color='#008080', width=2.5, dash='solid'), connectgaps=True,
+                                 visible='legendonly'),
                       row=1, col=1, secondary_y=False)
 
     if show_experimental_debug_traces and 'AI_State' in group.columns:

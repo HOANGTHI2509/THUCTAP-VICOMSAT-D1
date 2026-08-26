@@ -40,11 +40,11 @@ class FuelAnomalyDetector:
             if np.isnan(baseline_before):
                 baseline_before = float(fuels[i])
 
-            # Kiểm tra sụt giảm đột ngột hoặc sụt giảm từ từ trong vòng 5 điểm
+            # Kiểm tra sụt giảm mất tín hiệu cảm biến (rơi về sát 0L hoặc NaN đột ngột từ mức cao)
             drop_start_idx = -1
             for look_idx in range(i, min(n, i + 5)):
                 val_look = fuels[look_idx]
-                if not np.isnan(val_look) and (baseline_before - val_look) >= drop_thresh:
+                if np.isnan(val_look) or (val_look <= 1.0 and baseline_before >= drop_thresh):
                     drop_start_idx = i
                     break
 
@@ -56,8 +56,10 @@ class FuelAnomalyDetector:
                 k = drop_start_idx + 1
                 while k < n and times[k] <= max_t:
                     val = fuels[k]
+                    # Nếu gặp sự kiện bơm xăng lớn thì không nối đè qua
+                    if not np.isnan(val) and val > baseline_before + 10.0:
+                        break
                     # Phục hồi sụt cảm biến CHỈ KHI mức nhiên liệu nẩy về đúng sát mức trước sụt (trong khoảng ±5.0L)
-                    # KHÔNG ĐƯỢC nối đè qua các mốc bơm xăng sau nhiều tiếng xe chạy
                     epsilon = min(max(4.0, 0.03 * baseline_before), 5.0)
                     if not np.isnan(val) and abs(val - baseline_before) <= epsilon:
                         recovery_idx = k

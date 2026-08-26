@@ -221,6 +221,13 @@ def _postprocess_ai_state(df: pd.DataFrame, mode: str = "offline") -> pd.DataFra
                 if fuel <= prev_fuel + 0.8 and future_median <= fuel + 1.5:
                     result.loc[idx, "AI_State"] = "CONSUMPTION"
 
+            # Quy tắc đuôi bơm xăng (Refuel Continuation):
+            # Nếu điểm trước là REFUEL và điểm hiện tại tiếp tục dâng hoặc giữ ở mức đỉnh mới
+            prev_state = str(result.loc[indices[pos - 1], "AI_State"]) if pos > 0 else "UNKNOWN"
+            if prev_state == "REFUEL" and row.get("AI_State") in {"SLOSHING_NOISE", "STABLE_JITTER"}:
+                if fuel >= prev_fuel - max(flat, 1.0) and future_median >= fuel - max(flat, 2.5):
+                    result.loc[idx, "AI_State"] = "REFUEL"
+
     return result
 
 
