@@ -311,19 +311,30 @@ def filter_ai_enhanced_adaptive_realtime(
         )
 
         # 3. Xác nhận Bơm Xăng (REFUEL):
-        # Bắt buộc: Nhãn AI là REFUEL, HOẶC dốc đứng cực mạnh (fast_step) vượt ngưỡng nạp và không phải sóng sánh
+        # RF can label the rising edge of a real refuel as SLOSHING_NOISE.
+        # Therefore accept a parked, sustained level increase independently
+        # after several consecutive rising samples.
         prev_z = float(raw[i - 1]) if i > 0 else (previous_raw if not pd.isna(previous_raw) else float(z))
         prev2_z = float(raw[i - 2]) if i > 1 else (previous_raw_2 if not pd.isna(previous_raw_2) else prev_z)
         fast_step = (z - prev_z) >= max(event * 0.6, 5.5) or (z - prev2_z) >= max(event * 0.8, 7.5)
         min_refuel_jump = max(0.025 * capacity, event * 0.6, jitter * 4.0, 5.0)
         labeled_refuel = ai_state == "REFUEL" and float(confidence_values[i]) >= refuel_confidence
+        sustained_refuel = (
+            is_truly_parked
+            and observed > 5.0
+            and (z - x) >= min_refuel_jump
+            and rise_count >= 3
+            # A gradual drift while parked is sensor/thermal noise, not a
+            # refuel. The causal fallback also needs a real fast raw step.
+            and fast_step
+        )
 
         is_refuel = (labeled_refuel and (fast_step or rise_count >= 2)) or (
             is_truly_parked
             and ai_state not in {"SLOSHING_NOISE", "SPIKE"}
             and (z - x >= min_refuel_jump)
             and fast_step
-        ) or (recent_refuel_steps > 0 and (z - x) >= 1.5)
+        ) or sustained_refuel or (recent_refuel_steps > 0 and (z - x) >= 1.5)
 
         if is_spike:
             R = cfg_spike_r
