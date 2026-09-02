@@ -6,33 +6,44 @@ import argparse
 import pandas as pd
 from datetime import datetime
 
-sys.path.append(r"D:\THUCTAP_VICOMSAT")
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 from src.core.filters.kalman_traditional import BoLocKalmanTieuChuan1D
-from src.core.filters.kalman_adaptive import BoLocKalmanThichNghi1D
 
 API_URL = "http://localhost:8000/api/push"
 
 AVAILABLE_DATASETS = [
     {
         "id": "1",
-        "vehicle_id": "24H-04650",
-        "name": "Xe tải 24H-04650 (Dữ liệu tổng hợp fulltt)",
-        "file": r"D:\THUCTAP_VICOMSAT\fulltt\24H-04650_da_gop.xlsx",
-        "capacity": 500.0,
+        "vehicle_id": "21H-03221",
+        "name": "Xe bồn 21H-03221 (Lào Cai - TienXuLy)",
+        "file": os.path.join("TienXuLy", "21H-03221_processed.csv"),
+        "capacity": 850.0,
     },
     {
         "id": "2",
-        "vehicle_id": "29C-92841",
-        "name": "Xe cao tốc Ninh Bình (2026-08-27T00-48_export.csv)",
-        "file": r"D:\THUCTAP_VICOMSAT\2026-08-27T00-48_export.csv",
+        "vehicle_id": "24H-04650",
+        "name": "Xe tải 24H-04650 (Dữ liệu TienXuLy)",
+        "file": os.path.join("TienXuLy", "24H-04650_processed.csv"),
         "capacity": 500.0,
     },
     {
         "id": "3",
-        "vehicle_id": "29H-77123",
-        "name": "Xe thử nghiệm leo dốc (TEST DO DOC.csv)",
-        "file": r"D:\THUCTAP_VICOMSAT\TEST DO DOC.csv",
-        "capacity": 500.0,
+        "vehicle_id": "29E-45520",
+        "name": "Xe 29E-45520 (Dữ liệu TienXuLy)",
+        "file": os.path.join("TienXuLy", "29E-45520_processed.csv"),
+        "capacity": 200.0,
+    },
+    {
+        "id": "4",
+        "vehicle_id": "90H-03494",
+        "name": "Xe 90H-03494 (Dữ liệu TienXuLy)",
+        "file": os.path.join("TienXuLy", "90H-03494_processed.csv"),
+        "capacity": 250.0,
     },
 ]
 
@@ -49,10 +60,28 @@ def load_dataset(file_path: str) -> pd.DataFrame:
         raise ValueError(f"Không hỗ trợ định dạng file: {file_path}")
 
 
+def _stream_all_cars_concurrent():
+    import threading
+    print("\n" + "=" * 75)
+    print(f"🚀 KHỞI ĐỘNG PHÁT LUỒNG SONG SONG (MULTI-THREADING) CHO {len(AVAILABLE_DATASETS)} XE ĐỒNG THỜI")
+    print("=" * 75)
+    threads = []
+    for ds in AVAILABLE_DATASETS:
+        t = threading.Thread(target=_stream_single_car, args=(ds,), name=f"Thread-{ds['vehicle_id']}")
+        threads.append(t)
+        t.start()
+    for t in threads:
+        t.join()
+
+
 def simulate(choice_id: str = None):
     print("=" * 75)
     print("🚗 HỆ THỐNG PHÁT LUỒNG STREAMING TELEMETRY LÊN API VÀ WEB APP")
     print("=" * 75)
+
+    if choice_id in ["0", "all", "--all"]:
+        _stream_all_cars_concurrent()
+        return
 
     selected = None
     if choice_id:
@@ -65,18 +94,17 @@ def simulate(choice_id: str = None):
         print("\nVui lòng chọn xe để phát dữ liệu hành trình:")
         for ds in AVAILABLE_DATASETS:
             print(f"  [{ds['id']}] {ds['name']} -> Biển số: {ds['vehicle_id']}")
-        print("  [0] Tự động chạy lần lượt các xe")
+        print("  [0] PHÁT ĐỒNG THỜI TẤT CẢ CÁC XE (Multi-threading song song)")
         
         try:
-            val = input("\n👉 Nhập lựa chọn của bạn (1/2/3 hoặc nhấn Enter để chọn 1): ").strip()
+            val = input("\n👉 Nhập lựa chọn của bạn (1/2/3 hoặc 0 để chạy đồng thời tất cả): ").strip()
             if not val:
                 val = "1"
         except Exception:
             val = "1"
 
-        if val == "0":
-            for ds in AVAILABLE_DATASETS:
-                _stream_single_car(ds)
+        if val == "0" or val.lower() in ["all", "--all"]:
+            _stream_all_cars_concurrent()
             return
 
         for ds in AVAILABLE_DATASETS:
@@ -120,7 +148,6 @@ def _stream_single_car(selected: dict):
             break
 
     kf_traditional = BoLocKalmanTieuChuan1D(trang_thai_ban_dau=first_val, nhieu_do_luong=9.0, nhieu_qua_trinh=1.0)
-    kf_adaptive = BoLocKalmanThichNghi1D(trang_thai_ban_dau=first_val, capacity=capacity, r_co_ban=9.0, nhieu_qua_trinh=0.2)
 
     for idx, row in df.iterrows():
         # Trích xuất thời gian
@@ -162,27 +189,19 @@ def _stream_single_car(selected: dict):
 
         address = str(row.get("Address", str(row.get("address", "Hà Nội"))))
 
-        # Tính toán đối chứng
+        # Tính toán đối chứng Kalman truyền thống
         kalman_std = kf_traditional.cap_nhat(gia_tri_do=raw_fuel, ty_le_dt=1.0)
-        kalman_adapt = kf_adaptive.cap_nhat(
-            gia_tri_do=raw_fuel,
-            ty_le_dt=1.0,
-            trang_thai_chuyen_dong=1 if speed > 0 else 0,
-            van_toc=speed,
-            gia_toc=0.0,
-            rolling_std=1.0,
-        )
 
         payload = {
             "time": time_str,
             "vehicle_id": vehicle_id,
             "raw": raw_fuel,
             "kalman": round(kalman_std, 2),
-            "adaptive": round(kalman_adapt, 2),
             "speed": speed,
             "lat": lat,
             "lng": lng,
             "address": address,
+            "capacity_est": capacity,
         }
 
         try:
@@ -190,9 +209,8 @@ def _stream_single_car(selected: dict):
             if res.status_code == 200:
                 res_data = res.json()
                 if idx % 15 == 0 or idx < 3:
-                    clean_val = res_data.get("clean", 0.0)
-                    ai_state = res_data.get("state", "STABLE_JITTER")
-                    print(f"[{time_str}] Xe: {vehicle_id} | Raw: {raw_fuel:>6.1f}L | AI-Kalman: {clean_val:>6.1f}L | State: {ai_state:<18} -> Web App OK")
+                    q_len = res_data.get("queue_size", 0)
+                    print(f"[{time_str}] Xe: {vehicle_id} | Raw: {raw_fuel:>6.1f}L | Std-Kalman: {kalman_std:>6.1f}L | Queue: {q_len} -> Enqueued OK")
             else:
                 print(f"⚠️ API trả về mã lỗi: {res.status_code}")
         except Exception as e:
@@ -207,6 +225,6 @@ def _stream_single_car(selected: dict):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Phát luồng streaming dữ liệu xe lên Web App")
-    parser.add_argument("--car", type=str, default=None, help="Chọn xe (1: 24H-04650, 2: 29C-92841, 3: 29H-77123)")
+    parser.add_argument("--car", type=str, default=None, help="Chọn xe (1: 24H-04650, 2: 29E-45520, 3: 90H-03494)")
     args = parser.parse_args()
     simulate(args.car)

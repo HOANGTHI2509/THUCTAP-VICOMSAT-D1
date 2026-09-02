@@ -24,6 +24,11 @@ from src.core.filters.ai_enhanced_adaptive_realtime import (
 
 
 def load_fuel_state_classifier(model_dir: str = "models/fuel_state_classifier"):
+    if not os.path.isabs(model_dir):
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        candidate = os.path.join(base_dir, model_dir)
+        if os.path.exists(candidate):
+            model_dir = candidate
     model_path = os.path.join(model_dir, "fuel_state_classifier.pkl")
     metadata_path = os.path.join(model_dir, "metadata.json")
     if not os.path.exists(model_path) or not os.path.exists(metadata_path):
@@ -64,9 +69,9 @@ class StreamingStateManager:
         self._lock = threading.Lock()
         self._contexts: Dict[str, VehicleStreamContext] = {}
         
-        # Load AI Model (RF Causal v3)
+        # Load AI Model (RF Causal Classifier)
         if model_dir is None:
-            model_dir = str(Path("models/rf_signal_state_causal_v3"))
+            model_dir = str(Path("models/fuel_state_classifier"))
         self.model, self.metadata = load_fuel_state_classifier(model_dir)
         self.feature_columns = self.metadata.get("feature_columns", []) if self.metadata else []
         self.labels = self.metadata.get("labels", []) if self.metadata else []
@@ -192,6 +197,12 @@ class StreamingStateManager:
         has_gps = 1.0 if (lat is not None and lng is not None) else 0.0
         gps_speed = speed
 
+        # Rolling range for local transient score
+        valid_5 = valid_with_current[-5:] if len(valid_with_current) >= 5 else valid_with_current
+        local_range5 = float(max(valid_5) - min(valid_5)) if valid_5 else 0.0
+        valid_7 = valid_with_current[-7:] if len(valid_with_current) >= 7 else valid_with_current
+        local_range7 = float(max(valid_7) - min(valid_7)) if valid_7 else local_range5
+
         # 2. AI Inference
         feature_dict = {
             "FuelLevel": fuel_level,
@@ -214,6 +225,14 @@ class StreamingStateManager:
             "spike_threshold": spike,
             "event_threshold": event,
             "PrevMedian3": prev_median3,
+            "FutureMedian3": prev_median3,
+            "FutureMedian5": prev_median3,
+            "ReturnToPrevLevel": 0.0,
+            "LocalRange5": local_range5,
+            "LocalRange7": local_range7,
+            "PeakReversalFlag": 0,
+            "ValleyReversalFlag": 0,
+            "TransientScore": 0.0,
         }
 
         if self.model is not None and self.feature_columns:

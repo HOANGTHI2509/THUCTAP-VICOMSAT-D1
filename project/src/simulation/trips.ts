@@ -125,7 +125,7 @@ export const VEHICLES: Vehicle[] = [
         noiseLabel: "Real Data",
         noiseKind: "spiky",
         durationSec: 855540,
-        startTimeStr: "2026-07-29T00:00:00Z",
+        startTimeStr: "2026-08-10T00:00:00Z",
       }
     ]
   },

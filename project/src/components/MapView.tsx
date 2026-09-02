@@ -1,4 +1,5 @@
-import { MapContainer, TileLayer, Polyline, Marker, Popup } from "react-leaflet";
+import { useEffect } from "react";
+import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
@@ -18,6 +19,20 @@ const DefaultIcon = L.icon({
   shadowSize: [41, 41]
 });
 L.Marker.prototype.options.icon = DefaultIcon;
+
+function FitBounds({ positions }: { positions: [number, number][] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (positions && positions.length > 1) {
+      try {
+        map.fitBounds(positions, { padding: [40, 40] });
+      } catch {
+        // ignore if map not ready
+      }
+    }
+  }, [positions, map]);
+  return null;
+}
 
 interface MapViewProps {
   data: any[];
@@ -67,8 +82,9 @@ export default function MapView({ data }: MapViewProps) {
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <FitBounds positions={positions} />
         
         {positions.length > 0 && (
           <Polyline 

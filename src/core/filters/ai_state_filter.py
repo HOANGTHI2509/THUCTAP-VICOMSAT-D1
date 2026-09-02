@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 
 from src.core.filters.fuel_state_filter import build_fuel_state_profile
-from src.core.filters.tcn_state_classifier import predict_tcn_fuel_state
 
 
 TRANSIENT_LABELS = {"TRANSIENT_NOISE", "TRANSIENT_UP_NOISE", "TRANSIENT_DOWN_NOISE", "TRANSIENT_CLUSTER_NOISE"}
@@ -34,6 +33,9 @@ class AIStateFilterConfig:
     up_shift_follow_count: int = 4
     up_shift_follow_alpha: float = 0.55
     small_up_shift_alpha: float = 0.88
+    realtime_event_hold_alpha: float = 0.05
+    realtime_confirm_required: int = 2
+    realtime_confirm_count: int = 3
 
 
 def load_fuel_state_classifier(model_dir: str = "models/fuel_state_classifier"):
@@ -235,77 +237,6 @@ def _apply_rf_tcn_ensemble(df: pd.DataFrame, tcn_model=None, tcn_metadata: dict 
     result = df.copy()
     result["AI_State_RF"] = result["AI_State"].astype(str)
     result["AI_State_Ensemble"] = result["AI_State_RF"]
-    if tcn_model is None or not tcn_metadata:
-        result["AI_State"] = result["AI_State_Ensemble"]
-        return result
-
-    result = predict_tcn_fuel_state(result, tcn_model, tcn_metadata)
-    groups = result.groupby("SegmentID", sort=False, dropna=False) if "SegmentID" in result.columns else [(0, result)]
-
-    for _, group in groups:
-        ordered = group.sort_values("FuelTime", kind="stable") if "FuelTime" in group.columns else group
-        tcn_consumption_streak = 0
-        tcn_spike_streak = 0
-        prev_raw = np.nan
-
-        for idx, row in ordered.iterrows():
-            rf_state = str(row.get("AI_State_RF", "UNKNOWN"))
-            tcn_state = str(row.get("TCN_State", "UNKNOWN"))
-            tcn_conf = float(row.get("TCN_Confidence", 0.0) or 0.0)
-            flat = float(row.get("flat_jitter_threshold", 0.8) or 0.8)
-            fuel = float(row.get("FuelLevel", np.nan))
-            raw_step = 0.0 if pd.isna(prev_raw) or pd.isna(fuel) else fuel - prev_raw
-
-            if tcn_state == "CONSUMPTION" and raw_step < -flat * 0.25:
-                tcn_consumption_streak += 1
-            else:
-                tcn_consumption_streak = 0
-
-            if tcn_state == "SPIKE" or tcn_state in TRANSIENT_LABELS:
-                tcn_spike_streak += 1
-            else:
-                tcn_spike_streak = 0
-
-            ensemble_state = rf_state
-
-            if rf_state in {"REFUEL", "DRAIN"}:
-                ensemble_state = rf_state
-            elif rf_state == "SPIKE":
-                if tcn_state in TRANSIENT_LABELS and tcn_conf >= 0.70:
-                    ensemble_state = tcn_state
-                elif tcn_state == "SPIKE" or tcn_conf >= 0.88:
-                    ensemble_state = "SPIKE"
-                elif tcn_state in {"SLOSHING_NOISE", "CONSUMPTION"} and tcn_conf >= 0.75:
-                    ensemble_state = tcn_state
-            elif rf_state in TRANSIENT_LABELS:
-                if tcn_state in TRANSIENT_LABELS or tcn_conf >= 0.70:
-                    ensemble_state = rf_state
-                else:
-                    ensemble_state = "SPIKE"
-            elif rf_state == "SLOSHING_NOISE":
-                if tcn_state == "CONSUMPTION" and tcn_consumption_streak >= 3 and tcn_conf >= 0.62:
-                    ensemble_state = "CONSUMPTION"
-                elif tcn_state in TRANSIENT_LABELS and tcn_conf >= 0.82 and tcn_spike_streak <= 4:
-                    ensemble_state = tcn_state
-                elif tcn_state == "SPIKE" and tcn_conf >= 0.93 and tcn_spike_streak <= 2:
-                    ensemble_state = "SPIKE"
-                else:
-                    ensemble_state = "SLOSHING_NOISE"
-            elif rf_state == "CONSUMPTION":
-                ensemble_state = "CONSUMPTION"
-            elif rf_state == "STABLE_JITTER":
-                if tcn_state == "CONSUMPTION" and tcn_consumption_streak >= 4 and tcn_conf >= 0.70:
-                    ensemble_state = "CONSUMPTION"
-                elif tcn_state in TRANSIENT_LABELS and tcn_conf >= 0.90:
-                    ensemble_state = tcn_state
-                elif tcn_state == "SPIKE" and tcn_conf >= 0.95:
-                    ensemble_state = "SPIKE"
-                else:
-                    ensemble_state = "STABLE_JITTER"
-
-            result.loc[idx, "AI_State_Ensemble"] = ensemble_state
-            prev_raw = fuel
-
     result["AI_State"] = result["AI_State_Ensemble"]
     return result
 

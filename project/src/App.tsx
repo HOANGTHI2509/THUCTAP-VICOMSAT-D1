@@ -12,16 +12,34 @@ import { useRealtimeData } from "@/simulation/useRealtimeData";
 import type { Trip } from "@/simulation/types";
 
 export default function App() {
-  const [tripId, setTripId] = useState(DEFAULT_TRIP_ID);
+  const [tripId, setTripId] = useState("21H-03221");
+  const [liveVehicleId, setLiveVehicleId] = useState("21H-03221");
   const [darkMode, setDarkMode] = useState(false);
   const [view, setView] = useState<"dashboard" | "history">("dashboard");
   const [dataSource, setDataSource] = useState<"simulation" | "realtime">("realtime");
   
-  const trip = findTrip(tripId) ?? null;
+  const tripPreset = findTrip(tripId);
+  const trip: Trip = tripPreset ?? {
+    id: tripId,
+    vehicleId: tripId,
+    vehicleName: `Xe ${tripId}`,
+    tripName: "Hành trình Thực tế",
+    noiseLabel: "Cảm biến trực tiếp",
+    noiseKind: "spiky",
+    durationSec: 855540,
+    startTimeStr: "2026-08-10T00:00:00Z",
+  };
 
   const simLocal = useSimulation(trip);
-  const simLive = useRealtimeData();
+  const simLive = useRealtimeData(liveVehicleId);
   
+  const effectiveTrip: Trip = {
+    ...trip,
+    startTimeStr: (dataSource === "realtime" && simLive.startTimeStr) ? simLive.startTimeStr : trip.startTimeStr,
+    vehicleId: dataSource === "realtime" ? liveVehicleId : trip.vehicleId,
+    vehicleName: dataSource === "realtime" ? `Xe ${liveVehicleId}` : trip.vehicleName,
+  };
+
   const sim = dataSource === "simulation" ? simLocal : simLive;
 
   const handleTrip = (t: Trip) => setTripId(t.id);
@@ -35,12 +53,8 @@ export default function App() {
       simLocal.seek(0);
     } else if (dataSource === "realtime" && simLive.current?.vehicleId) {
       const vid = simLive.current.vehicleId;
-      if (vid.includes("29C-92841") && tripId !== "29C-92841") {
-        setTripId("29C-92841");
-      } else if (vid.includes("29H-77123") && tripId !== "29H-77123") {
-        setTripId("29H-77123");
-      } else if (vid.includes("24H-04650") && tripId !== "24H-04650") {
-        setTripId("24H-04650");
+      if (tripId !== vid) {
+        setTripId(vid);
       }
     }
   }, [tripId, dataSource, simLive.current?.vehicleId]);
@@ -120,7 +134,7 @@ export default function App() {
 
           <div className="flex gap-4 px-4 pb-4">
             <RollingChart
-              trip={trip!}
+              trip={effectiveTrip}
               points={sim.window}
               cursor={sim.cursor}
               windowSec={sim.windowSec}
@@ -130,11 +144,16 @@ export default function App() {
               <LiveStreamControl
                 current={sim.current}
                 pointsCount={sim.window.length}
+                selectedVehicleId={liveVehicleId}
+                onSelectVehicle={(vid) => {
+                  setLiveVehicleId(vid);
+                  setTripId(vid);
+                }}
                 onSwitch={simLive.refetch}
               />
             ) : (
               <RemoteControl
-                trip={trip!}
+                trip={effectiveTrip}
                 playing={sim.playing}
                 speed={sim.speed}
                 cursor={sim.cursor}
@@ -149,7 +168,7 @@ export default function App() {
           </div>
 
           <div className="px-4 pb-4">
-            <EventLog points={sim.events} trip={trip} />
+            <EventLog points={sim.events} trip={effectiveTrip} />
           </div>
         </>
       ) : (

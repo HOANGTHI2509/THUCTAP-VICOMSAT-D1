@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ConfigDict
 
 from src.service.state_manager import StreamingStateManager
+from src.service.queue_manager import VehicleQueueManager
+from src.core.filters.ai_state_filter import load_fuel_state_classifier, filter_with_ai_state
 
 # 1. Khởi tạo FastAPI App
 app = FastAPI(
@@ -27,8 +29,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. Khởi tạo In-Memory State Manager
+# 2. Khởi tạo In-Memory State Manager & Vehicle Queue Manager & AI Model
 state_manager = StreamingStateManager()
+queue_manager = VehicleQueueManager(state_manager=state_manager)
+ai_state_model, ai_state_metadata = load_fuel_state_classifier("models/fuel_state_classifier")
 
 
 # 3. Pydantic Schemas
@@ -159,100 +163,111 @@ def clean_fuel_batch(batch: FuelBatchInput) -> CleanBatchOutput:
     )
 
 
-# Ring buffer hỗ trợ Web App React (Dashboard Cockpit) hiển thị đồ thị Realtime
-LIVE_STREAM_BUFFER = collections.deque(maxlen=500)
+# Quản lý luồng và hàng chờ đa xe qua VehicleQueueManager
+LIVE_STREAM_BUFFER = queue_manager.global_live_buffer
+VEHICLE_STREAM_BUFFERS = queue_manager._buffers
 
 
 @app.get("/api/data", tags=["Web App Live Demo"])
-def get_live_data(limit: int = 300) -> List[Dict[str, Any]]:
-    """Lấy dữ liệu telemetry realtime mới nhất từ buffer cho Web App."""
-    items = list(LIVE_STREAM_BUFFER)
-    if not items:
-        return []
-    latest_vid = items[-1].get("vehicle_id")
-    # Chỉ trả về các điểm của cùng một xe đang active để không bao giờ bị trộn lẫn dữ liệu giữa 2 xe
-    filtered = [p for p in items if p.get("vehicle_id") == latest_vid]
-    return filtered[-limit:]
+def get_live_data(vehicle_id: Optional[str] = None, limit: int = 300) -> List[Dict[str, Any]]:
+    """Lấy dữ liệu telemetry realtime mới nhất theo xe được chọn từ hàng chờ/buffer."""
+    return queue_manager.get_vehicle_data(vehicle_id=vehicle_id, limit=limit)
 
 
 @app.post("/api/push", tags=["Web App Live Demo"])
 def push_live_point(data: Dict[str, Any]) -> Dict[str, Any]:
-    """Nhận điểm dữ liệu từ script mô phỏng hoặc thiết bị xe và cập nhật vào Live Buffer."""
-    raw_fuel = float(data.get("raw", data.get("raw_fuel", data.get("FuelLevel", 0.0))))
-    speed = float(data.get("speed", data.get("Speed", 0.0)))
-    lat = float(data.get("lat", data.get("Lat", 0.0)))
-    lng = float(data.get("lng", data.get("Lng", 0.0)))
-    time_str = str(data.get("time", data.get("FuelTime", datetime.now().isoformat())))
+    """Nhận điểm dữ liệu từ script mô phỏng hoặc thiết bị xe và đưa vào hàng chờ xử lý độc lập."""
     vid = str(data.get("vehicle_id", data.get("VehicleID", "24H-04650")))
+    res = queue_manager.enqueue(vid, data)
+    return res
 
-    # Nếu xe mới phát khác với xe đang có trong buffer, tự động xóa buffer cũ
-    if LIVE_STREAM_BUFFER and LIVE_STREAM_BUFFER[-1].get("vehicle_id") != vid:
-        LIVE_STREAM_BUFFER.clear()
 
-    try:
-        f_time = datetime.fromisoformat(time_str)
-    except Exception:
-        f_time = datetime.now()
-
-    res = state_manager.process_point(
-        vehicle_id=vid,
-        fuel_time=f_time,
-        fuel_level=raw_fuel,
-        speed=speed,
-        lat=lat,
-        lng=lng,
-    )
-    clean_val = res["clean_fuel_liters"]
-
-    point_payload = {
-        "time": time_str,
-        "speed": speed,
-        "raw": raw_fuel,
-        "kalman": data.get("kalman", clean_val),
-        "adaptive": data.get("adaptive", clean_val),
-        "ai_enhanced": clean_val,
-        "lat": lat,
-        "lng": lng,
-        "address": data.get("address", ""),
-        "vehicle_id": vid,
-        "state": res["ai_signal_state"],
-    }
-    LIVE_STREAM_BUFFER.append(point_payload)
-    return {"status": "ok", "clean": clean_val, "state": res["ai_signal_state"]}
+@app.get("/api/fleet/status", tags=["Web App Live Demo"])
+def get_fleet_status() -> List[Dict[str, Any]]:
+    """Giám sát tình trạng hàng đợi và dữ liệu realtime của toàn bộ các xe trong đội xe."""
+    return queue_manager.get_fleet_status()
 
 
 @app.post("/api/switch-vehicle", tags=["Web App Live Demo"])
 def switch_live_vehicle(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Chuyển đổi xe hiển thị trực tiếp từ giao diện Web App."""
     vehicle_id = str(payload.get("vehicle_id", "24H-04650"))
-    history_pts = get_history(vehicle_id=vehicle_id)
-    LIVE_STREAM_BUFFER.clear()
-    for pt in history_pts[:150]:
-        LIVE_STREAM_BUFFER.append(pt)
-    return {"status": "switched", "vehicle_id": vehicle_id, "total_points": len(LIVE_STREAM_BUFFER)}
+    queue_manager.switch_active_vehicle(vehicle_id)
+    cur_data = queue_manager.get_vehicle_data(vehicle_id)
+    if not cur_data:
+        history_pts = get_history(vehicle_id=vehicle_id)
+        for pt in history_pts[:150]:
+            queue_manager.enqueue(vehicle_id, pt)
+    return {"status": "switched", "vehicle_id": vehicle_id, "total_points": len(cur_data)}
 
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 DATASET_FILE_MAP = {
-    "24H-04650": os.path.join(BASE_DIR, "fulltt", "24H-04650_da_gop.xlsx"),
-    "29C-92841": os.path.join(BASE_DIR, "2026-08-27T00-48_export.csv"),
-    "29H-77123": os.path.join(BASE_DIR, "TEST DO DOC.csv"),
+    "21H-03221": os.path.join(BASE_DIR, "TienXuLy", "21H-03221_processed.csv"),
+    "24H-04650": os.path.join(BASE_DIR, "TienXuLy", "24H-04650_processed.csv"),
+    "29E-45520": os.path.join(BASE_DIR, "TienXuLy", "29E-45520_processed.csv"),
+    "90H-03494": os.path.join(BASE_DIR, "TienXuLy", "90H-03494_processed.csv"),
 }
+
+
+VEHICLE_INFO_CACHE: List[Dict[str, Any]] = []
+
+
+@app.get("/api/vehicles", tags=["Web App Live Demo"])
+def list_available_vehicles() -> List[Dict[str, Any]]:
+    """Trả về danh sách tất cả các xe kèm ngày bắt đầu, ngày kết thúc và tổng số điểm đo."""
+    global VEHICLE_INFO_CACHE
+    if VEHICLE_INFO_CACHE:
+        return VEHICLE_INFO_CACHE
+
+    import glob
+    import pandas as pd
+    files = glob.glob(os.path.join(BASE_DIR, "TienXuLy", "*_processed.csv"))
+    vehicles = []
+    for f in sorted(files):
+        vid = os.path.basename(f).replace("_processed.csv", "")
+        try:
+            df_time = pd.read_csv(f, usecols=["FuelTime"])
+            s_date = str(df_time["FuelTime"].min())[:10]
+            e_date = str(df_time["FuelTime"].max())[:10]
+            t_pts = len(df_time)
+        except Exception:
+            s_date = "2026-08-10"
+            e_date = "2026-08-18"
+            t_pts = 0
+
+        vehicles.append({
+            "id": vid,
+            "name": f"Xe {vid}",
+            "start_date": s_date,
+            "end_date": e_date,
+            "total_points": t_pts,
+        })
+    VEHICLE_INFO_CACHE = vehicles
+    return vehicles
+
+
+@app.get("/api/current-vehicle", tags=["Web App Live Demo"])
+def get_current_vehicle() -> Dict[str, Any]:
+    """Trả về biển số xe đang nhận luồng dữ liệu telemetry thời gian thực."""
+    active_vid = LIVE_STREAM_BUFFER[-1].get("vehicle_id") if LIVE_STREAM_BUFFER else "21H-03221"
+    return {"vehicle_id": active_vid, "total_points": len(LIVE_STREAM_BUFFER)}
 
 
 HISTORY_CACHE = {}
 
 
 @app.get("/api/history", tags=["Web App Live Demo"])
-def get_history(vehicle_id: str = "24H-04650", start_date: str = "", end_date: str = "") -> List[Dict[str, Any]]:
+def get_history(vehicle_id: str = "21H-03221", start_date: str = "", end_date: str = "", limit: int = 10000) -> List[Dict[str, Any]]:
     """Tra cứu lịch sử dữ liệu lọc theo xe và khoảng ngày được chọn."""
+    import glob
     # Tự động chuẩn hóa nếu người dùng chọn ngày bắt đầu lớn hơn ngày kết thúc
     if start_date and end_date and start_date > end_date:
         start_date, end_date = end_date, start_date
 
-    cache_key = f"{vehicle_id}_{start_date}_{end_date}"
-    if cache_key in HISTORY_CACHE and len(HISTORY_CACHE[cache_key]) > 0:
+    cache_key = f"{vehicle_id}_{start_date}_{end_date}_{limit}"
+    if cache_key in HISTORY_CACHE:
         return HISTORY_CACHE[cache_key]
 
     # 1. Tìm file dữ liệu của xe
@@ -261,6 +276,17 @@ def get_history(vehicle_id: str = "24H-04650", start_date: str = "", end_date: s
         if vid in vehicle_id:
             target_file = path
             break
+
+    # Nếu không thuộc các xe ghim sẵn, tìm trong toàn bộ thư mục TienXuLy
+    if not target_file:
+        cand = os.path.join(BASE_DIR, "TienXuLy", f"{vehicle_id}_processed.csv")
+        if os.path.exists(cand):
+            target_file = cand
+        else:
+            for f in glob.glob(os.path.join(BASE_DIR, "TienXuLy", "*_processed.csv")):
+                if vehicle_id in f:
+                    target_file = f
+                    break
 
     if not target_file or not os.path.exists(target_file):
         return list(LIVE_STREAM_BUFFER)
@@ -298,14 +324,24 @@ def get_history(vehicle_id: str = "24H-04650", start_date: str = "", end_date: s
                 pass
 
         if len(df_filtered) == 0:
-            df_sample = df.head(300).copy()
+            df_sample = df.head(limit).copy()
         else:
-            df_sample = df_filtered.head(500).copy()
+            df_sample = df_filtered.head(limit).copy()
 
         df_sample["FuelLevel"] = pd.to_numeric(df_sample[fuel_col].astype(str).str.replace(",", "."), errors="coerce").fillna(100.0)
         df_sample["Speed"] = pd.to_numeric(df_sample[speed_col].astype(str).str.replace(",", "."), errors="coerce").fillna(0.0)
+        df_sample["FuelTime"] = df_sample[time_col].astype(str)
 
-        # Chạy lọc AI-Kalman vectorized
+        # 1. Trích đặc trưng & Phân loại trạng thái AI (Random Forest)
+        if ai_state_model is not None and ai_state_metadata is not None:
+            df_sample = filter_with_ai_state(
+                df_sample,
+                model=ai_state_model,
+                metadata=ai_state_metadata,
+                mode="realtime",
+            )
+
+        # 2. Chạy lọc Adaptive Kalman theo nhãn AI
         clean_fuels = filter_ai_enhanced_adaptive_realtime(df_sample, config={"source_col": "FuelLevel"})
 
         results = []
@@ -314,11 +350,18 @@ def get_history(vehicle_id: str = "24H-04650", start_date: str = "", end_date: s
             raw_val = float(row.get("FuelLevel", 0.0))
             clean_val = float(clean_fuels[i]) if i < len(clean_fuels) and not np.isnan(clean_fuels[i]) else raw_val
             speed_val = float(row.get("Speed", 0.0))
+            ai_st = str(row.get("AI_State", "NORMAL"))
             
-            lat_raw = str(row.get("Lat", 21.0285)).replace(",", ".")
-            lng_raw = str(row.get("Lng", 105.8542)).replace(",", ".")
-            lat_val = float(lat_raw) if lat_raw.replace(".", "").replace("-", "").isdigit() else 21.0285
-            lng_val = float(lng_raw) if lng_raw.replace(".", "").replace("-", "").isdigit() else 105.8542
+            lat_raw = str(row.get("Lat", 21.0285)).replace(",", ".").strip()
+            lng_raw = str(row.get("Lng", 105.8542)).replace(",", ".").strip()
+            try:
+                lat_val = float(lat_raw)
+            except Exception:
+                lat_val = 21.0285
+            try:
+                lng_val = float(lng_raw)
+            except Exception:
+                lng_val = 105.8542
             
             if lat_val > 50 and lng_val < 50:
                 lat_val, lng_val = lng_val, lat_val
@@ -336,6 +379,7 @@ def get_history(vehicle_id: str = "24H-04650", start_date: str = "", end_date: s
                 "lng": lng_val,
                 "address": str(row.get("Address", "")),
                 "vehicle_id": vehicle_id,
+                "state": ai_st,
             })
 
         HISTORY_CACHE[cache_key] = results

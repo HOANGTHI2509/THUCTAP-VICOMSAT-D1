@@ -23,6 +23,9 @@ export interface TripPoint {
   isSpike: boolean;
   vehicleId?: string;
   aiState?: string;
+  lat?: number;
+  lng?: number;
+  address?: string;
 }
 
 export interface Vehicle {

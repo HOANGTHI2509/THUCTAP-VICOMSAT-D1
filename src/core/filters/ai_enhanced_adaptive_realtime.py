@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 from dataclasses import asdict, dataclass
-from src.core.signal_labels import to_signal_label
+
 
 
 # Chuyển một cột DataFrame sang mảng số float; nếu cột thiếu hoặc giá trị lỗi thì dùng giá trị mặc định.
@@ -144,14 +144,14 @@ def filter_ai_enhanced_adaptive_realtime(
     drain_max_gap_minutes = float(config.get("drain_max_gap_minutes", 30.0))
     dropout_recovery_confirm_points = int(config.get("dropout_recovery_confirm_points", 3))
 
-    # Bộ tham số Q/R mặc định cho từng trạng thái tín hiệu. R lớn = ít tin measurement; Q lớn = cho phép trạng thái đổi nhanh.
+    # Bộ tham số Q/R cho từng trạng thái tín hiệu (hỗ trợ cả nhãn mới và cấu hình dashboard).
     cfg_unk_r, cfg_unk_q = config.get("UNKNOWN", (25.0, 0.15))
-    cfg_ref_r, cfg_ref_q = config.get("UPWARD_SHIFT", (1.0, 5.0))
-    cfg_slosh_r, cfg_slosh_q = config.get("OSCILLATION_NOISE", (1000.0, 0.001))
-    cfg_cons_r, cfg_cons_q = config.get("GRADUAL_CHANGE", (25.0, 0.15))
-    cfg_drain_r, cfg_drain_q = config.get("DOWNWARD_SHIFT", (5.0, 2.0))
+    cfg_ref_r, cfg_ref_q = config.get("UPWARD_SHIFT", config.get("REFUEL", (1.0, 5.0)))
+    cfg_slosh_r, cfg_slosh_q = config.get("OSCILLATION_NOISE", config.get("SLOSHING", (1000.0, 0.001)))
+    cfg_cons_r, cfg_cons_q = config.get("GRADUAL_CHANGE", config.get("CONSUMPTION", (25.0, 0.15)))
+    cfg_drain_r, cfg_drain_q = config.get("DOWNWARD_SHIFT", config.get("DRAIN", (5.0, 2.0)))
     cfg_stable_r, cfg_stable_q, cfg_stable_r_very = config.get("STABLE_JITTER", (35.0, 0.05, 15.0))
-    cfg_spike_r, cfg_spike_q = config.get("IMPULSE_NOISE", (10000.0, 0.0001))
+    cfg_spike_r, cfg_spike_q = config.get("IMPULSE_NOISE", config.get("SPIKE", (10000.0, 0.0001)))
 
     # Khôi phục trạng thái đã lưu từ bản tin telemetry trước của đúng chiếc xe này.
     x = np.nan if stream_state.x is None else float(stream_state.x)
@@ -196,8 +196,17 @@ def filter_ai_enhanced_adaptive_realtime(
             or (z <= 1.0 and qflag in {"1", "1.0"})
         )
 
-        # Chuẩn hóa nhãn cũ của mô hình sang bộ nhãn trạng thái tín hiệu mới.
-        ai_state = to_signal_label(states[i])
+        # Chuẩn hóa nhãn trạng thái tín hiệu trực tiếp (ưu tiên nhãn mới, dự phòng nhãn cũ).
+        raw_state = str(states[i]).strip().upper()
+        legacy_map = {
+            "REFUEL": "UPWARD_SHIFT",
+            "DRAIN": "DOWNWARD_SHIFT",
+            "CONSUMPTION": "GRADUAL_CHANGE",
+            "SLOSHING": "OSCILLATION_NOISE",
+            "SLOSHING_NOISE": "OSCILLATION_NOISE",
+            "SPIKE": "IMPULSE_NOISE",
+        }
+        ai_state = legacy_map.get(raw_state, raw_state)
         capacity = max(float(capacity_values[i]), 50.0)
         noise = max(float(noise_values[i]), 0.1)
         jitter = max(float(jitter_values[i]), 0.1)

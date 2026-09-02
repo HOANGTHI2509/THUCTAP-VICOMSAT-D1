@@ -1,5 +1,0 @@
-Model,RMSE (L) ↓,SNR (dB) ↑,Smoothness (L/step),Refuel F1 ↑,Theft F1 ↑,Delay (steps) ↓,Latency (ms) ↓,Params
-Raw,14.39,8.17,4.23,0.191,0.011,2.0,0.000,N/A
-Standard Kalman,11.22,10.71,0.92,0.257,0.018,16.8,0.003,N/A
-Adaptive Kalman,12.30,9.76,1.54,0.340,0.016,3.9,0.004,N/A
-1D-CNN + Gated Attention,4.75,18.95,1.68,0.269,0.022,4.5,0.326,17518
