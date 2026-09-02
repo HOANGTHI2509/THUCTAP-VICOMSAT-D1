@@ -24,10 +24,22 @@ interface MapViewProps {
 }
 
 export default function MapView({ data }: MapViewProps) {
-  // Filter out invalid coordinates
-  const validPoints = data.filter(
-    (row) => row.lat && row.lng && row.lat !== 0 && row.lng !== 0
-  );
+  // Filter out invalid coordinates and fix swapped lat/lng
+  const validPoints = data
+    .map((row) => {
+      let lat = Number(row.lat);
+      let lng = Number(row.lng);
+      if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return null;
+
+      // Nếu bị ngược (Lat > 90 là Kinh độ Lng, Lng < 90 là Vĩ độ Lat)
+      if (lat > 50 && lng < 50) {
+        const tmp = lat;
+        lat = lng;
+        lng = tmp;
+      }
+      return { ...row, lat, lng };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null && row.lat > 5 && row.lat < 30 && row.lng > 90 && row.lng < 120);
 
   if (validPoints.length === 0) {
     return (

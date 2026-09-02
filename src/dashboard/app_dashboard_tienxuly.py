@@ -497,11 +497,19 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
     df_seg['FuelLevel_Filtered_Edge'] = np.nan
     df_seg['FuelLevel_Filtered_AlphaBeta'] = np.nan
     
+    def apply_by_segment(frame, operation):
+        """Run a transform per segment without losing SegmentID on pandas 2.x/3.x."""
+        segment_by_row = frame["SegmentID"].copy()
+        result = (
+            frame.groupby("SegmentID", sort=False, dropna=False, group_keys=False)
+            .apply(operation)
+        )
+        if "SegmentID" not in result.columns:
+            result["SegmentID"] = segment_by_row.reindex(result.index).fillna(0)
+        return result
+
     anomaly_detector = FuelAnomalyDetector(capacity=estimated_capacity)
-    df_seg = (
-        df_seg.groupby("SegmentID", sort=False, dropna=False, group_keys=False)
-        .apply(lambda g: anomaly_detector.detect_and_clean(g))
-    )
+    df_seg = apply_by_segment(df_seg, lambda g: anomaly_detector.detect_and_clean(g))
     
     if "Acceleration" not in df_seg.columns:
         if "Speed" in df_seg.columns:
@@ -511,62 +519,54 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         else:
             df_seg["Acceleration"] = 0.0
 
-    df_seg = (
-        df_seg.groupby("SegmentID", sort=False, dropna=False, group_keys=False)
-        .apply(
-            lambda group: classify_signal_modes(
-                group,
-                vehicle_profile,
-                source_col="FuelLevel",
-                output_col="ProfileCleanFuel",
-                mode_col="SignalMode",
-                lookback=7,
-                lookahead=5,
-            )
-        )
+    df_seg = apply_by_segment(
+        df_seg,
+        lambda group: classify_signal_modes(
+            group,
+            vehicle_profile,
+            source_col="FuelLevel",
+            output_col="ProfileCleanFuel",
+            mode_col="SignalMode",
+            lookback=7,
+            lookahead=5,
+        ),
     )
 
-    df_seg = (
-        df_seg.groupby("SegmentID", sort=False, dropna=False, group_keys=False)
-        .apply(
-            lambda group: filter_fuel_series(
-                group,
-                vehicle_profile,
-                source_col="FuelLevel",
-                lookback=7,
-                lookahead=5,
-            )
-        )
+    df_seg = apply_by_segment(
+        df_seg,
+        lambda group: filter_fuel_series(
+            group,
+            vehicle_profile,
+            source_col="FuelLevel",
+            lookback=7,
+            lookahead=5,
+        ),
     )
 
-    df_seg = (
-        df_seg.groupby("SegmentID", sort=False, dropna=False, group_keys=False)
-        .apply(
-            lambda group: clean_transient_shapes(
-                group,
-                vehicle_profile,
-                source_col="FuelLevel",
-                output_col="ShapeCleanFuel",
-                flag_col="ShapeCleanFlag",
-                max_points=50,
-            )
-        )
+    df_seg = apply_by_segment(
+        df_seg,
+        lambda group: clean_transient_shapes(
+            group,
+            vehicle_profile,
+            source_col="FuelLevel",
+            output_col="ShapeCleanFuel",
+            flag_col="ShapeCleanFlag",
+            max_points=50,
+        ),
     )
 
     if ai_state_model is not None and ai_state_metadata is not None:
-        df_seg = (
-            df_seg.groupby("SegmentID", sort=False, dropna=False, group_keys=False)
-            .apply(
-                lambda group: filter_with_ai_state(
-                    group,
-                    model=ai_state_model,
-                    metadata=ai_state_metadata,
-                    tcn_model=tcn_state_model,
-                    tcn_metadata=tcn_state_metadata,
-                    profile=vehicle_profile,
-                    mode=ai_filter_mode,
-                )
-            )
+        df_seg = apply_by_segment(
+            df_seg,
+            lambda group: filter_with_ai_state(
+                group,
+                model=ai_state_model,
+                metadata=ai_state_metadata,
+                tcn_model=tcn_state_model,
+                tcn_metadata=tcn_state_metadata,
+                profile=vehicle_profile,
+                mode=ai_filter_mode,
+            ),
         )
     else:
         df_seg["AI_State"] = "MODEL_NOT_FOUND"

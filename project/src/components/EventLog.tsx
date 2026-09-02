@@ -1,5 +1,5 @@
 import { ScrollText } from "lucide-react";
-import type { TripPoint } from "@/simulation/types";
+import type { TripPoint, Trip } from "@/simulation/types";
 
 interface Props {
   points: TripPoint[];

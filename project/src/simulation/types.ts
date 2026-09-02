@@ -21,6 +21,8 @@ export interface TripPoint {
   cnn1DFuel?: number;
   noise: number;
   isSpike: boolean;
+  vehicleId?: string;
+  aiState?: string;
 }
 
 export interface Vehicle {

@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  vicomsat-fuel-api:
+    build: .
+    container_name: vicomsat-fuel-api
+    ports:
+      - "8000:8000"
+    restart: always
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    # volumes:
+    #   - ./models:/app/models # Bỏ comment nếu muốn mount model từ ngoài vào mà không cần build lại

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Moon, Radio, Sun, Activity, History, Wifi, Database } from "lucide-react";
 import RemoteControl from "@/components/RemoteControl";
+import LiveStreamControl from "@/components/LiveStreamControl";
 import Dashboard from "@/components/Dashboard";
 import RollingChart from "@/components/RollingChart";
 import EventLog from "@/components/EventLog";
@@ -32,9 +33,17 @@ export default function App() {
   useEffect(() => {
     if (dataSource === "simulation") {
       simLocal.seek(0);
+    } else if (dataSource === "realtime" && simLive.current?.vehicleId) {
+      const vid = simLive.current.vehicleId;
+      if (vid.includes("29C-92841") && tripId !== "29C-92841") {
+        setTripId("29C-92841");
+      } else if (vid.includes("29H-77123") && tripId !== "29H-77123") {
+        setTripId("29H-77123");
+      } else if (vid.includes("24H-04650") && tripId !== "24H-04650") {
+        setTripId("24H-04650");
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tripId, dataSource]);
+  }, [tripId, dataSource, simLive.current?.vehicleId]);
 
   return (
     <div className="min-h-screen flex flex-col bg-cockpit-950 text-cockpit-100 transition-colors duration-300">
@@ -117,7 +126,13 @@ export default function App() {
               windowSec={sim.windowSec}
               playing={sim.playing}
             />
-            {dataSource === "simulation" && (
+            {dataSource === "realtime" ? (
+              <LiveStreamControl
+                current={sim.current}
+                pointsCount={sim.window.length}
+                onSwitch={simLive.refetch}
+              />
+            ) : (
               <RemoteControl
                 trip={trip!}
                 playing={sim.playing}

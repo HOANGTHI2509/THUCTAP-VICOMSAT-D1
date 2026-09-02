@@ -1,0 +1,50 @@
+[
+  {
+    "File": "D:\\THUCTAP_VICOMSAT\\artifacts\\slide_assets\\signal_examples\\01_refuel.svg",
+    "Title": "REFUEL - Tăng nhiên liệu thật",
+    "VehicleID": "Car 5",
+    "FuelTime": "2025-12-20 13:55:22.999999",
+    "FuelLevel": "589.80",
+    "Label": "REFUEL"
+  },
+  {
+    "File": "D:\\THUCTAP_VICOMSAT\\artifacts\\slide_assets\\signal_examples\\02_drain.svg",
+    "Title": "DRAIN - Giảm nhiên liệu bất thường",
+    "VehicleID": "Car 5",
+    "FuelTime": "2025-12-20 07:56:42.000003",
+    "FuelLevel": "164.60",
+    "Label": "DRAIN"
+  },
+  {
+    "File": "D:\\THUCTAP_VICOMSAT\\artifacts\\slide_assets\\signal_examples\\03_consumption.svg",
+    "Title": "CONSUMPTION - Giảm nhiên liệu theo xu hướng",
+    "VehicleID": "29E-51878",
+    "FuelTime": "2026-08-15 12:12:00",
+    "FuelLevel": "126.60",
+    "Label": "CONSUMPTION"
+  },
+  {
+    "File": "D:\\THUCTAP_VICOMSAT\\artifacts\\slide_assets\\signal_examples\\04_stable_jitter.svg",
+    "Title": "STABLE_JITTER - Dao động nhỏ quanh mức ổn định",
+    "VehicleID": "Car 1",
+    "FuelTime": "2025-11-20 03:10:58.999999",
+    "FuelLevel": "189.30",
+    "Label": "STABLE_JITTER"
+  },
+  {
+    "File": "D:\\THUCTAP_VICOMSAT\\artifacts\\slide_assets\\signal_examples\\05_sloshing_noise.svg",
+    "Title": "SLOSHING_NOISE - Dao động mạnh do rung lắc/sóng sánh",
+    "VehicleID": "21H-03221",
+    "FuelTime": "2026-08-17 18:08:00",
+    "FuelLevel": "815.20",
+    "Label": "SLOSHING_NOISE"
+  },
+  {
+    "File": "D:\\THUCTAP_VICOMSAT\\artifacts\\slide_assets\\signal_examples\\06_dropout_spike.svg",
+    "Title": "DROPOUT/SPIKE - Nhảy/tụt đột ngột rồi quay lại",
+    "VehicleID": "21H-03052",
+    "FuelTime": "2026-08-14 08:56:00",
+    "FuelLevel": "782.10",
+    "Label": "SLOSHING_NOISE"
+  }
+]

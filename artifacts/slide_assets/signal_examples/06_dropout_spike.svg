@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="720" viewBox="0 0 1400 720">
+  <style>
+    .title { font: 700 29px Arial, sans-serif; fill: #1c2b41; }
+    .caption { font: 16px Arial, sans-serif; fill: #60708a; }
+    .axis { font: 14px Arial, sans-serif; fill: #60708a; }
+    .detail { font: 14px Arial, sans-serif; fill: #60708a; }
+    .callout { font: 16px Arial, sans-serif; fill: #1c2b41; }
+  </style>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <text x="52" y="48" class="title">DROPOUT/SPIKE - Nhảy/tụt đột ngột rồi quay lại</text>
+  <text x="54" y="80" class="caption">Sự kiện ngắn hạn cần được từ chối thay vì cập nhật mức nhiên liệu.</text>
+  <line x1="120" y1="112" x2="1330" y2="112" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="118" class="axis">824.5</text>
+<line x1="120" y1="212" x2="1330" y2="212" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="218" class="axis">813.4</text>
+<line x1="120" y1="312" x2="1330" y2="312" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="318" class="axis">802.3</text>
+<line x1="120" y1="412" x2="1330" y2="412" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="418" class="axis">791.2</text>
+<line x1="120" y1="512" x2="1330" y2="512" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="518" class="axis">780.1</text>
+<line x1="120" y1="612" x2="1330" y2="612" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="618" class="axis">769.0</text>
+  <polyline fill="none" stroke="#e22c2c" stroke-width="3" points="120.0,471.3 163.2,471.3 206.4,471.3 249.6,500.1 292.9,451.5 336.1,449.7 379.3,267.1 422.5,297.7 465.7,422.7 508.9,422.7 552.1,422.7 595.4,407.4 638.6,547.8 681.8,278.8 725.0,493.8 768.2,346.3 811.4,340.0 854.6,340.0 897.9,340.0 941.1,340.0 984.3,341.8 1027.5,341.8 1070.7,340.0 1113.9,341.8 1157.1,361.6 1200.4,172.6 1243.6,277.0 1286.8,463.2 1330.0,551.4"/>
+  <circle cx="120.0" cy="471.3" r="3.1" fill="#e22c2c"/><circle cx="163.2" cy="471.3" r="3.1" fill="#e22c2c"/><circle cx="206.4" cy="471.3" r="3.1" fill="#e22c2c"/><circle cx="249.6" cy="500.1" r="3.1" fill="#e22c2c"/><circle cx="292.9" cy="451.5" r="3.1" fill="#e22c2c"/><circle cx="336.1" cy="449.7" r="3.1" fill="#e22c2c"/><circle cx="379.3" cy="267.1" r="3.1" fill="#e22c2c"/><circle cx="422.5" cy="297.7" r="3.1" fill="#e22c2c"/><circle cx="465.7" cy="422.7" r="3.1" fill="#e22c2c"/><circle cx="508.9" cy="422.7" r="3.1" fill="#e22c2c"/><circle cx="552.1" cy="422.7" r="3.1" fill="#e22c2c"/><circle cx="595.4" cy="407.4" r="3.1" fill="#e22c2c"/><circle cx="638.6" cy="547.8" r="3.1" fill="#e22c2c"/><circle cx="681.8" cy="278.8" r="3.1" fill="#e22c2c"/><circle cx="725.0" cy="493.8" r="3.1" fill="#e22c2c"/><circle cx="768.2" cy="346.3" r="3.1" fill="#e22c2c"/><circle cx="811.4" cy="340.0" r="3.1" fill="#e22c2c"/><circle cx="854.6" cy="340.0" r="3.1" fill="#e22c2c"/><circle cx="897.9" cy="340.0" r="3.1" fill="#e22c2c"/><circle cx="941.1" cy="340.0" r="3.1" fill="#e22c2c"/><circle cx="984.3" cy="341.8" r="3.1" fill="#e22c2c"/><circle cx="1027.5" cy="341.8" r="3.1" fill="#e22c2c"/><circle cx="1070.7" cy="340.0" r="3.1" fill="#e22c2c"/><circle cx="1113.9" cy="341.8" r="3.1" fill="#e22c2c"/><circle cx="1157.1" cy="361.6" r="3.1" fill="#e22c2c"/><circle cx="1200.4" cy="172.6" r="3.1" fill="#e22c2c"/><circle cx="1243.6" cy="277.0" r="3.1" fill="#e22c2c"/><circle cx="1286.8" cy="463.2" r="3.1" fill="#e22c2c"/><circle cx="1330.0" cy="551.4" r="3.1" fill="#e22c2c"/>
+  <circle cx="725" cy="493.8109839487512" r="10" fill="#6c4fa9" stroke="#414141" stroke-width="2"/>
+  <text x="742" y="476.8109839487512" class="callout">Diem mau</text>
+  <text x="120" y="692" class="detail">Xe: 21H-03052 | 2026-08-14 08:56:00 | Fuel: 782.1 L</text>
+  <text x="52" y="662" class="axis">Muc nhien lieu (L)</text>
+</svg>

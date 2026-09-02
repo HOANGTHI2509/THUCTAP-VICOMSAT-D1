@@ -115,7 +115,7 @@ export default function RollingChart({ trip, points, cursor, windowSec, playing 
           </div>
           <div className="flex items-center gap-4 text-[11px] ml-2 border-l border-cockpit-700 pl-4">
             <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-fuel-raw" /><span className="text-cockpit-300">Xăng gốc</span></span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-blue-500" /><span className="text-[10px] uppercase tracking-widest text-cockpit-400">Random Forest Classifier</span></span>
+            <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-blue-500" /><span className="text-[10px] uppercase tracking-widest text-blue-400 font-semibold">AI-Enhanced Kalman (Causal v3)</span></span>
             <label className="flex items-center gap-1.5 cursor-pointer hover:bg-cockpit-700 px-2 py-1 rounded transition-colors">
               <input 
                 type="checkbox" 
@@ -203,7 +203,7 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
   const plotH = h - padT - padB;
   const tMax = Math.max(cursor, windowSec);
   const tMin = tMax - windowSec;
-  const visible = points.filter((point) => point.t >= tMin && point.t <= tMax);
+  const visible = points.filter((point) => point.t >= tMin && point.t <= tMax).sort((a, b) => a.t - b.t);
   const speedHex = getCssVar("--color-speed");
   const speedGridHex = getCssVar("--chart-speed-grid");
   const rawHex = getCssVar("--color-fuel-raw");
@@ -309,12 +309,14 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
 }
 
 function drawLine(ctx: CanvasRenderingContext2D, points: TripPoint[], yOf: (point: TripPoint) => number, xOf: (t: number) => number, color: string, width: number, blur: number) {
+  if (points.length === 0) return;
+  const sorted = [...points].sort((a, b) => a.t - b.t);
   ctx.strokeStyle = color;
   ctx.lineWidth = width;
   ctx.shadowColor = color;
   ctx.shadowBlur = blur;
   ctx.beginPath();
-  points.forEach((point, index) => {
+  sorted.forEach((point, index) => {
     const x = xOf(point.t);
     const y = yOf(point);
     if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);

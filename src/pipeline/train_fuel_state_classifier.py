@@ -7,6 +7,15 @@ import pickle
 import random
 from collections import Counter, defaultdict
 
+SIGNAL_LABELS = {
+    "UPWARD_SHIFT",
+    "DOWNWARD_SHIFT",
+    "GRADUAL_CHANGE",
+    "STABLE_JITTER",
+    "OSCILLATION_NOISE",
+    "UNKNOWN",
+    "IMPULSE_NOISE",
+}
 
 FEATURE_COLUMNS = [
     "FuelLevel",
@@ -41,23 +50,17 @@ FEATURE_COLUMNS = [
 
 DROP_LABELS = {"UNKNOWN", "INVALID", ""}
 MERGE_LABELS = {
-    "DROPOUT": "SLOSHING_NOISE",
-    "SPIKE": "SLOSHING_NOISE",
-    "SPIKE_UP": "SLOSHING_NOISE",
-    "SPIKE_DOWN": "SLOSHING_NOISE",
-    "TRANSIENT_NOISE": "SLOSHING_NOISE",
-    "TRANSIENT_UP_NOISE": "SLOSHING_NOISE",
-    "TRANSIENT_DOWN_NOISE": "SLOSHING_NOISE",
-    "TRANSIENT_CLUSTER_NOISE": "SLOSHING_NOISE",
+    "DROPOUT": "OSCILLATION_NOISE",
+    "SPIKE": "OSCILLATION_NOISE",
+    "SPIKE_UP": "OSCILLATION_NOISE",
+    "SPIKE_DOWN": "OSCILLATION_NOISE",
+    "TRANSIENT_NOISE": "OSCILLATION_NOISE",
+    "TRANSIENT_UP_NOISE": "OSCILLATION_NOISE",
+    "TRANSIENT_DOWN_NOISE": "OSCILLATION_NOISE",
+    "TRANSIENT_CLUSTER_NOISE": "OSCILLATION_NOISE",
     "NORMAL": "STABLE_JITTER",
 }
-TRAIN_LABELS = [
-    "STABLE_JITTER",
-    "CONSUMPTION",
-    "SLOSHING_NOISE",
-    "REFUEL",
-    "DRAIN",
-]
+TRAIN_LABELS = [label for label in SIGNAL_LABELS if label not in {"UNKNOWN", "IMPULSE_NOISE"}]
 
 
 def _to_float(value, default=0.0):
@@ -73,8 +76,7 @@ def _to_float(value, default=0.0):
 
 
 def normalize_label(label):
-    label = str(label or "").strip()
-    label = MERGE_LABELS.get(label, label)
+    label = str(label or "").strip().upper()
     if label in DROP_LABELS:
         return None
     if label not in TRAIN_LABELS:

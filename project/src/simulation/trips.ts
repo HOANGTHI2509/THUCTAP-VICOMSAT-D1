@@ -2,6 +2,54 @@ import { Vehicle, Trip } from "./types";
 
 export const VEHICLES: Vehicle[] = [
   {
+    id: "24H-04650",
+    name: "🚗 24H-04650 (Xe tải tổng hợp)",
+    trips: [
+      {
+        id: "24H-04650",
+        vehicleId: "24H-04650",
+        vehicleName: "Xe tải 24H-04650",
+        tripName: "Hành trình tổng hợp (fulltt)",
+        noiseLabel: "Sóng sánh & Tiêu hao",
+        noiseKind: "spiky",
+        durationSec: 855420,
+        startTimeStr: "2024-08-12T01:43:00Z",
+      }
+    ]
+  },
+  {
+    id: "29C-92841",
+    name: "🚗 29C-92841 (Cao tốc Ninh Bình)",
+    trips: [
+      {
+        id: "29C-92841",
+        vehicleId: "29C-92841",
+        vehicleName: "Xe 29C-92841",
+        tripName: "Cao tốc Cầu Giẽ - Ninh Bình",
+        noiseLabel: "Chạy tốc độ cao & Dừng nghỉ",
+        noiseKind: "spiky",
+        durationSec: 855420,
+        startTimeStr: "2026-08-24T00:00:00Z",
+      }
+    ]
+  },
+  {
+    id: "29H-77123",
+    name: "🚗 29H-77123 (Thử nghiệm leo dốc)",
+    trips: [
+      {
+        id: "29H-77123",
+        vehicleId: "29H-77123",
+        vehicleName: "Xe 29H-77123",
+        tripName: "Đo dốc nghiêng & Phanh gấp",
+        noiseLabel: "Nhiễu dốc nghiêng xe",
+        noiseKind: "burst",
+        durationSec: 855420,
+        startTimeStr: "2026-08-24T00:00:00Z",
+      }
+    ]
+  },
+  {
     id: "19B-04587",
     name: "Xe 19B-04587",
     trips: [

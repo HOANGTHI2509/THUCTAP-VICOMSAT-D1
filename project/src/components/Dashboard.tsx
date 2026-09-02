@@ -80,7 +80,7 @@ function FuelReadout({ value, label, color, flashing }: {
 }
 
 export default function Dashboard({ current, playing }: Props) {
-  const [showAI, setShowAI] = useState(false);
+  const [showAI, setShowAI] = useState(true);
   const speed = current?.speed ?? 0;
   const raw = current?.rawFuel ?? 0;
   const filtered = current?.adaptiveKalman ?? 0;
@@ -97,12 +97,26 @@ export default function Dashboard({ current, playing }: Props) {
 
   return (
     <div className="rounded-2xl bg-cockpit-850 border border-cockpit-700 shadow-2xl overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-2 border-b border-cockpit-700">
-        <div className="flex items-center gap-2">
-          <Radio size={15} className="text-cockpit-400" />
-          <span className="text-xs uppercase tracking-widest text-cockpit-400">Táp-lô trực tiếp</span>
+      <div className="flex items-center justify-between px-5 py-2.5 border-b border-cockpit-700 bg-cockpit-900/60">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Radio size={15} className="text-fuel-filter" />
+            <span className="text-xs uppercase tracking-widest text-cockpit-300 font-semibold">Táp-lô trực tiếp</span>
+          </div>
+          <div className="px-3 py-1 rounded-lg bg-blue-500/20 border border-blue-500/40 text-blue-400 text-xs font-mono font-bold flex items-center gap-2 shadow-sm">
+            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+            <span>🚗 Biển số: <span className="text-white tracking-wide">{current?.vehicleId || "24H-04650"}</span></span>
+          </div>
+          {current?.aiState && (
+            <div className="px-2.5 py-0.5 rounded-md bg-cockpit-800 border border-cockpit-700 text-cockpit-300 text-[11px] font-mono">
+              Trạng thái AI: <span className="text-fuel-filter font-semibold">{current.aiState}</span>
+            </div>
+          )}
         </div>
-        <div className="text-[10px] text-cockpit-500 font-mono">{statusText}</div>
+        <div className="text-[11px] text-cockpit-400 font-mono flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+          <span>{statusText}</span>
+        </div>
       </div>
 
       <div className="flex items-center justify-around gap-4 px-5 py-3 flex-wrap">
@@ -110,18 +124,7 @@ export default function Dashboard({ current, playing }: Props) {
           color="var(--color-speed)" icon={<GaugeIcon size={12} />} />
         <FuelReadout value={raw} label="Xăng gốc (nhiễu)" color="var(--color-fuel-raw)" flashing={alert} />
         <FuelReadout value={filtered} label="Xăng sau lọc (Adaptive)" color="var(--color-fuel-filter)" flashing={false} />
-        
-        {showAI ? (
-          <FuelReadout value={aiFiltered} label="Xăng sau lọc (AI GRU)" color="#3b82f6" flashing={false} />
-        ) : (
-          <button 
-            onClick={() => setShowAI(true)}
-            className="flex flex-col items-center justify-center w-[72px] h-[72px] rounded-full border-2 border-dashed border-cockpit-700 text-cockpit-500 hover:text-blue-400 hover:border-blue-500/50 hover:bg-blue-500/10 transition-colors cursor-pointer shrink-0"
-          >
-            <span className="text-xl leading-none mb-1">+</span>
-            <span className="text-[9px] uppercase tracking-wider font-semibold">Bật AI</span>
-          </button>
-        )}
+        <FuelReadout value={aiFiltered} label="Xăng sau lọc (AI-Kalman)" color="#3b82f6" flashing={false} />
         <div className="flex items-center gap-3">
           <div className={`w-[72px] h-[72px] rounded-2xl flex flex-col items-center justify-center gap-1 transition-all shrink-0
               ${alert

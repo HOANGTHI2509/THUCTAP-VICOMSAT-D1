@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="720" viewBox="0 0 1400 720">
+  <style>
+    .title { font: 700 29px Arial, sans-serif; fill: #1c2b41; }
+    .caption { font: 16px Arial, sans-serif; fill: #60708a; }
+    .axis { font: 14px Arial, sans-serif; fill: #60708a; }
+    .detail { font: 14px Arial, sans-serif; fill: #60708a; }
+    .callout { font: 16px Arial, sans-serif; fill: #1c2b41; }
+  </style>
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <text x="52" y="48" class="title">REFUEL - Tăng nhiên liệu thật</text>
+  <text x="54" y="80" class="caption">Tăng lớn duy trì sau sự kiện, cần bám nhanh.</text>
+  <line x1="120" y1="112" x2="1330" y2="112" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="118" class="axis">671.6</text>
+<line x1="120" y1="212" x2="1330" y2="212" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="218" class="axis">551.0</text>
+<line x1="120" y1="312" x2="1330" y2="312" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="318" class="axis">430.3</text>
+<line x1="120" y1="412" x2="1330" y2="412" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="418" class="axis">309.6</text>
+<line x1="120" y1="512" x2="1330" y2="512" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="518" class="axis">188.9</text>
+<line x1="120" y1="612" x2="1330" y2="612" stroke="#dfe7ef" stroke-width="1"/><text x="38" y="618" class="axis">68.3</text>
+  <polyline fill="none" stroke="#e22c2c" stroke-width="3" points="120.0,543.3 163.2,543.3 206.4,543.3 249.6,543.6 292.9,544.0 336.1,544.2 379.3,544.2 422.5,538.5 465.7,542.5 508.9,545.4 552.1,549.6 595.4,548.1 638.6,551.4 681.8,546.9 725.0,179.8 768.2,177.4 811.4,173.9 854.6,172.6 897.9,174.7 941.1,178.0 984.3,178.0 1027.5,182.1 1070.7,180.1 1113.9,181.2 1157.1,184.6 1200.4,185.8 1243.6,185.9 1286.8,186.1 1330.0,185.0"/>
+  <circle cx="120.0" cy="543.3" r="3.1" fill="#e22c2c"/><circle cx="163.2" cy="543.3" r="3.1" fill="#e22c2c"/><circle cx="206.4" cy="543.3" r="3.1" fill="#e22c2c"/><circle cx="249.6" cy="543.6" r="3.1" fill="#e22c2c"/><circle cx="292.9" cy="544.0" r="3.1" fill="#e22c2c"/><circle cx="336.1" cy="544.2" r="3.1" fill="#e22c2c"/><circle cx="379.3" cy="544.2" r="3.1" fill="#e22c2c"/><circle cx="422.5" cy="538.5" r="3.1" fill="#e22c2c"/><circle cx="465.7" cy="542.5" r="3.1" fill="#e22c2c"/><circle cx="508.9" cy="545.4" r="3.1" fill="#e22c2c"/><circle cx="552.1" cy="549.6" r="3.1" fill="#e22c2c"/><circle cx="595.4" cy="548.1" r="3.1" fill="#e22c2c"/><circle cx="638.6" cy="551.4" r="3.1" fill="#e22c2c"/><circle cx="681.8" cy="546.9" r="3.1" fill="#e22c2c"/><circle cx="725.0" cy="179.8" r="3.1" fill="#e22c2c"/><circle cx="768.2" cy="177.4" r="3.1" fill="#e22c2c"/><circle cx="811.4" cy="173.9" r="3.1" fill="#e22c2c"/><circle cx="854.6" cy="172.6" r="3.1" fill="#e22c2c"/><circle cx="897.9" cy="174.7" r="3.1" fill="#e22c2c"/><circle cx="941.1" cy="178.0" r="3.1" fill="#e22c2c"/><circle cx="984.3" cy="178.0" r="3.1" fill="#e22c2c"/><circle cx="1027.5" cy="182.1" r="3.1" fill="#e22c2c"/><circle cx="1070.7" cy="180.1" r="3.1" fill="#e22c2c"/><circle cx="1113.9" cy="181.2" r="3.1" fill="#e22c2c"/><circle cx="1157.1" cy="184.6" r="3.1" fill="#e22c2c"/><circle cx="1200.4" cy="185.8" r="3.1" fill="#e22c2c"/><circle cx="1243.6" cy="185.9" r="3.1" fill="#e22c2c"/><circle cx="1286.8" cy="186.1" r="3.1" fill="#e22c2c"/><circle cx="1330.0" cy="185.0" r="3.1" fill="#e22c2c"/>
+  <circle cx="725" cy="179.81554331324622" r="10" fill="#159f77" stroke="#414141" stroke-width="2"/>
+  <text x="742" y="162.81554331324622" class="callout">Diem mau</text>
+  <text x="120" y="692" class="detail">Xe: Car 5 | 2025-12-20 13:55:22.999999 | Fuel: 589.8 L</text>
+  <text x="52" y="662" class="axis">Muc nhien lieu (L)</text>
+</svg>

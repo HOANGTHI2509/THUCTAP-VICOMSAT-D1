@@ -1,21 +1,24 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
-*.pyc
-*.csv
-*.xlsx
-*.db
-*.sqlite
-*.npy
-*.pt
-*.pkl
-*.png
-*.jpg
-*.jpeg
-*.svg
-data/
-artifacts/
-dulieu/
-fulltt/
-luuanh/
-TienXuLy/
-scratch/
-reports/
+*.py[cod]
+*$py.class
+
+# Virtual environments & local packages
+.venv/
+venv/
+ENV/
+.ml_deps/
+
+# Node / frontend builds & modules
+project/node_modules/
+project/dist/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Files exceeding GitHub 100MB limit (stored as .zip files in the same folders)
+data/fuel_label_dataset/all_labeled_points.csv
+data/fuel_label_dataset/train.csv
+data/real_dataset/windows/X_train_N30.npy
+models/ml_causal_v2/random_forest_causal_v2.pkl

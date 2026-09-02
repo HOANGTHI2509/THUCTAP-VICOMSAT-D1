@@ -1,86 +1,86 @@
 Model: random_forest
 Features: ['FuelLevel', 'FuelPct', 'Speed', 'MotionSpeedKmh', 'TimeGapMinutes', 'DeltaFuel', 'DeltaPct', 'AbsDeltaFuel', 'DeltaOverNoise', 'RollingStd12', 'RollingStdPct', 'DistanceMeters', 'GpsSpeedKmh', 'HasGPS', 'capacity_est', 'noise_sigma_liters', 'flat_jitter_threshold', 'spike_threshold', 'event_threshold', 'PrevMedian3', 'FutureMedian3', 'FutureMedian5', 'ReturnToPrevLevel', 'LocalRange5', 'LocalRange7', 'PeakReversalFlag', 'ValleyReversalFlag', 'TransientScore']
 Train raw rows: 268916
-Train balanced rows: 61466
+Train balanced rows: 58755
 Validation rows: 20171
 Test rows: 23483
 
 Train raw label counts:
 STABLE_JITTER: 240161
-SLOSHING_NOISE: 15854
-CONSUMPTION: 12612
-REFUEL: 252
-DRAIN: 37
+OSCILLATION_NOISE: 15854
+GRADUAL_CHANGE: 12612
+UPWARD_SHIFT: 252
+DOWNWARD_SHIFT: 37
 
 Train balanced label counts:
 STABLE_JITTER: 30000
-SLOSHING_NOISE: 15854
-CONSUMPTION: 12612
-REFUEL: 1500
-DRAIN: 1500
+OSCILLATION_NOISE: 15854
+GRADUAL_CHANGE: 12612
+UPWARD_SHIFT: 252
+DOWNWARD_SHIFT: 37
 
 
 VALIDATION CLASSIFICATION REPORT
-                precision    recall  f1-score   support
+                   precision    recall  f1-score   support
 
- STABLE_JITTER       1.00      1.00      1.00     16956
-   CONSUMPTION       0.97      1.00      0.98       599
-SLOSHING_NOISE       0.97      0.99      0.98      2572
-        REFUEL       0.91      1.00      0.95        29
-         DRAIN       0.88      0.93      0.90        15
+     UPWARD_SHIFT       0.91      1.00      0.95        29
+   DOWNWARD_SHIFT       0.93      0.87      0.90        15
+   GRADUAL_CHANGE       0.97      1.00      0.98       599
+    STABLE_JITTER       1.00      1.00      1.00     16956
+OSCILLATION_NOISE       0.98      0.99      0.98      2572
 
-      accuracy                           1.00     20171
-     macro avg       0.94      0.98      0.96     20171
-  weighted avg       1.00      1.00      1.00     20171
+         accuracy                           1.00     20171
+        macro avg       0.96      0.97      0.96     20171
+     weighted avg       1.00      1.00      1.00     20171
 
-VALIDATION CONFUSION MATRIX labels=['STABLE_JITTER', 'CONSUMPTION', 'SLOSHING_NOISE', 'REFUEL', 'DRAIN']
-16885,7,64,0,0
-0,598,1,0,0
-8,12,2547,3,2
-0,0,0,29,0
-0,0,1,0,14
+VALIDATION CONFUSION MATRIX labels=['UPWARD_SHIFT', 'DOWNWARD_SHIFT', 'GRADUAL_CHANGE', 'STABLE_JITTER', 'OSCILLATION_NOISE']
+29,0,0,0,0
+0,13,0,0,2
+0,0,598,0,1
+0,0,8,16887,61
+3,1,12,8,2548
 
 
 TEST CLASSIFICATION REPORT
-                precision    recall  f1-score   support
+                   precision    recall  f1-score   support
 
- STABLE_JITTER       1.00      0.98      0.99     17928
-   CONSUMPTION       0.98      0.90      0.94      1526
-SLOSHING_NOISE       0.87      0.99      0.92      3849
-        REFUEL       0.96      1.00      0.98        64
-         DRAIN       0.95      0.78      0.85       116
+     UPWARD_SHIFT       0.94      1.00      0.97        64
+   DOWNWARD_SHIFT       0.97      0.72      0.83       116
+   GRADUAL_CHANGE       0.98      0.91      0.94      1526
+    STABLE_JITTER       1.00      0.98      0.99     17928
+OSCILLATION_NOISE       0.87      0.99      0.92      3849
 
-      accuracy                           0.97     23483
-     macro avg       0.95      0.93      0.94     23483
-  weighted avg       0.98      0.97      0.97     23483
+         accuracy                           0.97     23483
+        macro avg       0.95      0.92      0.93     23483
+     weighted avg       0.98      0.97      0.97     23483
 
-TEST CONFUSION MATRIX labels=['STABLE_JITTER', 'CONSUMPTION', 'SLOSHING_NOISE', 'REFUEL', 'DRAIN']
-17527,1,400,0,0
-0,1381,145,0,0
-14,29,3798,3,5
-0,0,0,64,0
-0,0,26,0,90
+TEST CONFUSION MATRIX labels=['UPWARD_SHIFT', 'DOWNWARD_SHIFT', 'GRADUAL_CHANGE', 'STABLE_JITTER', 'OSCILLATION_NOISE']
+64,0,0,0,0
+0,84,0,0,32
+0,0,1393,0,133
+0,0,0,17518,410
+4,3,30,13,3799
 
 
 PER-VEHICLE TEST RESULTS
 
-90H-03494: rows=4979, accuracy=0.9982
-4691,0,8,0,0
-0,240,1,0,0
-0,0,37,0,0
-0,0,0,2,0
+90H-03494: rows=4979, accuracy=0.9980
+2,0,0,0,0
 0,0,0,0,0
+0,0,240,0,1
+0,0,0,4690,9
+0,0,0,0,37
 
-92H-02687: rows=4806, accuracy=0.9979
-4148,0,10,0,0
-0,576,0,0,0
-0,0,72,0,0
+92H-02687: rows=4806, accuracy=0.9981
 0,0,0,0,0
 0,0,0,0,0
+0,0,576,0,0
+0,0,0,4149,9
+0,0,0,0,72
 
-Car 5: rows=13698, accuracy=0.9559
-8688,1,382,0,0
-0,565,144,0,0
-14,29,3689,3,5
-0,0,0,62,0
-0,0,26,0,90
+Car 5: rows=13698, accuracy=0.9558
+62,0,0,0,0
+0,84,0,0,32
+0,0,577,0,132
+0,0,0,8679,392
+4,3,30,13,3690

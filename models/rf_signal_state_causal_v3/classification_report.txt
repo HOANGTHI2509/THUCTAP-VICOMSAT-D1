@@ -1,0 +1,86 @@
+Model: random_forest
+Features: ['FuelLevel', 'FuelPct', 'Speed', 'MotionSpeedKmh', 'TimeGapMinutes', 'DeltaFuel', 'DeltaPct', 'AbsDeltaFuel', 'DeltaOverNoise', 'RollingStd12', 'RollingStdPct', 'DistanceMeters', 'GpsSpeedKmh', 'HasGPS', 'capacity_est', 'noise_sigma_liters', 'flat_jitter_threshold', 'spike_threshold', 'event_threshold', 'PrevMedian3']
+Train raw rows: 268916
+Train balanced rows: 58755
+Validation rows: 20171
+Test rows: 23483
+
+Train raw label counts:
+STABLE_JITTER: 240161
+OSCILLATION_NOISE: 15854
+GRADUAL_CHANGE: 12612
+UPWARD_SHIFT: 252
+DOWNWARD_SHIFT: 37
+
+Train balanced label counts:
+STABLE_JITTER: 30000
+OSCILLATION_NOISE: 15854
+GRADUAL_CHANGE: 12612
+UPWARD_SHIFT: 252
+DOWNWARD_SHIFT: 37
+
+
+VALIDATION CLASSIFICATION REPORT
+                   precision    recall  f1-score   support
+
+     UPWARD_SHIFT       0.83      1.00      0.91        29
+   DOWNWARD_SHIFT       0.75      0.80      0.77        15
+   GRADUAL_CHANGE       0.88      0.73      0.80       599
+    STABLE_JITTER       1.00      0.94      0.97     16956
+OSCILLATION_NOISE       0.69      0.97      0.80      2572
+
+         accuracy                           0.94     20171
+        macro avg       0.83      0.89      0.85     20171
+     weighted avg       0.96      0.94      0.94     20171
+
+VALIDATION CONFUSION MATRIX labels=['UPWARD_SHIFT', 'DOWNWARD_SHIFT', 'GRADUAL_CHANGE', 'STABLE_JITTER', 'OSCILLATION_NOISE']
+29,0,0,0,0
+0,12,0,0,3
+0,0,440,0,159
+0,0,0,15987,969
+6,4,60,16,2486
+
+
+TEST CLASSIFICATION REPORT
+                   precision    recall  f1-score   support
+
+     UPWARD_SHIFT       0.89      0.98      0.93        64
+   DOWNWARD_SHIFT       0.90      0.54      0.68       116
+   GRADUAL_CHANGE       0.96      0.90      0.93      1526
+    STABLE_JITTER       1.00      0.97      0.98     17928
+OSCILLATION_NOISE       0.83      0.97      0.89      3849
+
+         accuracy                           0.96     23483
+        macro avg       0.91      0.87      0.88     23483
+     weighted avg       0.97      0.96      0.96     23483
+
+TEST CONFUSION MATRIX labels=['UPWARD_SHIFT', 'DOWNWARD_SHIFT', 'GRADUAL_CHANGE', 'STABLE_JITTER', 'OSCILLATION_NOISE']
+63,0,0,0,1
+0,63,0,0,53
+0,0,1372,0,154
+0,0,0,17349,579
+8,7,57,35,3742
+
+
+PER-VEHICLE TEST RESULTS
+
+90H-03494: rows=4979, accuracy=0.9972
+1,0,0,0,1
+0,0,0,0,0
+0,0,240,0,1
+0,0,0,4687,12
+0,0,0,0,37
+
+92H-02687: rows=4806, accuracy=0.9938
+0,0,0,0,0
+0,0,0,0,0
+0,0,575,0,1
+0,0,0,4131,27
+1,0,1,0,70
+
+Car 5: rows=13698, accuracy=0.9379
+62,0,0,0,0
+0,63,0,0,53
+0,0,557,0,152
+0,0,0,8531,540
+7,7,56,35,3635

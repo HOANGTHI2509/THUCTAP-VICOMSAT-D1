@@ -1,0 +1,39 @@
+# Git & dependencies local
+.git/
+.ml_deps/
+.venv/
+venv/
+env/
+.env
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+logs/
+artifacts/
+
+# Dữ liệu thô và tài liệu
+data/
+dulieu/
+TestDoDoc/
+DU_lieu_VICOMSAT/
+*.csv
+*.xlsx
+*.db
+*.png
+*.jpg
+
+# Thư mục models không dùng
+models/cnn*
+models/fuel_state_tcn*
+
+# Temporary & scratch
+*.ipynb
+.ipynb_checkpoints/
+fix_*.py
+temp_*.txt
