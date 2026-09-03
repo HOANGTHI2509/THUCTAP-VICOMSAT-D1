@@ -237,11 +237,14 @@ class StreamingStateManager:
 
         if self.model is not None and self.feature_columns:
             feat_vector = np.array([[feature_dict.get(col, 0.0) for col in self.feature_columns]], dtype=float)
-            pred_raw = self.model.predict(feat_vector)[0]
-            ai_signal_state = str(pred_raw)
             if hasattr(self.model, "predict_proba"):
-                conf = float(self.model.predict_proba(feat_vector).max())
+                probs = self.model.predict_proba(feat_vector)[0]
+                idx = probs.argmax()
+                ai_signal_state = str(self.model.classes_[idx])
+                conf = float(probs[idx])
             else:
+                pred_raw = self.model.predict(feat_vector)[0]
+                ai_signal_state = str(pred_raw)
                 conf = 0.95
         else:
             # Fallback heuristic if model is not present

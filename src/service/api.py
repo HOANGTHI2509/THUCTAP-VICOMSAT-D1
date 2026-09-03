@@ -2,19 +2,30 @@ from __future__ import annotations
 
 import os
 import time
+import io
+import logging
 import collections
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, AliasChoices
 
 from src.service.state_manager import StreamingStateManager
 from src.service.queue_manager import VehicleQueueManager
 from src.core.filters.ai_state_filter import load_fuel_state_classifier, filter_with_ai_state
+from src.db.database import get_db_manager
+from src.sdk.fuel_cleaner import FuelCleanerEngine
 
-# 1. Khởi tạo FastAPI App
+logger = logging.getLogger("FuelAPI")
+
+# 1. Khởi tạo FastAPI App & Cấu hình bảo mật
+API_KEY = os.getenv("API_KEY", "vicomsat_secret_key_2026")
+REQUIRE_API_KEY = os.getenv("REQUIRE_API_KEY", "false").lower() in ("true", "1", "yes")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./fuel_records.db")
+
 app = FastAPI(
     title="VICOMSAT Real-time Fuel Denoising & Filtering API",
     description="Microservice thời gian thực (Causal AI + Adaptive Kalman) khử nhiễu dữ liệu cảm biến nhiên liệu cho Vcomsat.",
@@ -29,13 +40,77 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 2. Khởi tạo In-Memory State Manager & Vehicle Queue Manager & AI Model
+
+@app.middleware("http")
+async def security_api_key_middleware(request: Request, call_next):
+    """
+    Middleware xác thực API Key linh hoạt cho môi trường Doanh nghiệp.
+    Mặc định REQUIRE_API_KEY=false để môi trường Local Demo không bị chặn.
+    """
+    path = request.url.path
+    if REQUIRE_API_KEY and (path.startswith("/api/v1/clean") or path.startswith("/api/v1/events")):
+        api_key_header = request.headers.get("X-API-Key")
+        auth_header = request.headers.get("Authorization")
+        token = None
+        if api_key_header:
+            token = api_key_header.strip()
+        elif auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ", 1)[1].strip()
+
+        if not token or token != API_KEY:
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "status": "error",
+                    "error_code": "UNAUTHORIZED",
+                    "message": "API Key không hợp lệ hoặc thiếu trong Header X-API-Key (hoặc Authorization: Bearer <KEY>).",
+                },
+            )
+    return await call_next(request)
+
+
+# 2. Khởi tạo In-Memory State Manager & SDK & DB 3NF
 state_manager = StreamingStateManager()
 queue_manager = VehicleQueueManager(state_manager=state_manager)
 ai_state_model, ai_state_metadata = load_fuel_state_classifier("models/fuel_state_classifier")
+sdk_engine = FuelCleanerEngine()
+db_manager = get_db_manager(DATABASE_URL)
 
 
-# 3. Pydantic Schemas
+# 3. Pydantic Schemas Doanh Nghiệp (Hỗ trợ Bí danh Tiếng Anh / Tiếng Việt)
+class EnterprisePointInput(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    vehicle_id: str = Field(..., validation_alias=AliasChoices("vehicle_id", "bien_so", "car_id", "VehicleID"), example="29H-75028")
+    timestamp: str = Field(..., validation_alias=AliasChoices("timestamp", "time", "thoi_gian", "FuelTime"), example="2026-08-15 09:16:00")
+    raw_fuel: float = Field(..., validation_alias=AliasChoices("raw_fuel", "fuel", "xang_tho", "FuelLevel", "raw"), example=93.3)
+    speed: float = Field(0.0, validation_alias=AliasChoices("speed", "van_toc", "Speed"), example=61.0)
+    distance_m: float = Field(0.0, validation_alias=AliasChoices("distance_m", "quang_duong", "DistanceMeters"), example=0.0)
+    lat: Optional[float] = Field(None, validation_alias=AliasChoices("lat", "vi_do", "Lat"), example=21.0285)
+    lng: Optional[float] = Field(None, validation_alias=AliasChoices("lng", "kinh_do", "Lng"), example=105.8542)
+    address: Optional[str] = Field(None, validation_alias=AliasChoices("address", "dia_chi", "Address"))
+    capacity_est: Optional[float] = Field(None, validation_alias=AliasChoices("capacity_est", "dung_tich", "capacity"), example=95.0)
+
+
+class EnterpriseCleanResponse(BaseModel):
+    vehicle_id: str
+    timestamp: str
+    raw_fuel: float
+    clean_fuel: float
+    speed: float
+    ai_state: str
+    ai_state_desc: str
+    event_label: str
+    confidence: float
+    is_refuel: bool
+    is_drain: bool
+    is_spike: bool
+    processing_time_ms: float
+    saved_to_db: bool
+
+
+class EnterpriseBatchInput(BaseModel):
+    points: List[EnterprisePointInput]
 class FuelPointInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -90,8 +165,98 @@ def health_check() -> Dict[str, Any]:
         "model_loaded": state_manager.model is not None,
         "model_type": "RandomForest_Causal_v3",
         "active_vehicles_in_memory": len(state_manager._contexts),
+        "database_enabled": db_manager.enabled,
+        "api_key_required": REQUIRE_API_KEY,
         "timestamp": datetime.now().isoformat(),
     }
+
+
+@app.post("/api/v1/clean", response_model=EnterpriseCleanResponse, tags=["Enterprise API"])
+def enterprise_clean_point(point: EnterprisePointInput) -> EnterpriseCleanResponse:
+    """
+    Endpoint chuẩn Doanh nghiệp: Nhận 1 điểm đo thô (hỗ trợ bí danh tiếng Anh/Việt)
+    -> Lọc AI-Kalman thời gian thực -> Tự lưu vào CSDL 3NF (nếu bật DB)
+    -> Trả ngay JSON kết quả song ngữ (< 5ms).
+    """
+    res = sdk_engine.clean_point(
+        vehicle_id=point.vehicle_id,
+        timestamp=point.timestamp,
+        raw_fuel=point.raw_fuel,
+        speed=point.speed,
+        distance_m=point.distance_m,
+        lat=point.lat,
+        lng=point.lng,
+        capacity_est=point.capacity_est,
+    )
+
+    saved_to_db = False
+    if db_manager.enabled:
+        log_id = db_manager.save_measurement(
+            vehicle_id=point.vehicle_id,
+            timestamp=point.timestamp,
+            raw_fuel=point.raw_fuel,
+            clean_fuel=res["clean_fuel"],
+            speed=point.speed,
+            lat=point.lat,
+            lng=point.lng,
+            state_code=res["ai_state"],
+            capacity_est=point.capacity_est,
+        )
+        if log_id:
+            saved_to_db = True
+
+        # Tự động lưu biến cố vào bảng fuel_events
+        if res["is_refuel"]:
+            db_manager.save_event(
+                vehicle_id=point.vehicle_id,
+                event_type="REFUEL",
+                start_time=point.timestamp,
+                end_time=point.timestamp,
+                start_fuel=point.raw_fuel,
+                end_fuel=res["clean_fuel"],
+                change_liters=round(res["clean_fuel"] - point.raw_fuel, 2),
+                lat=point.lat,
+                lng=point.lng,
+                address=point.address,
+                capacity_est=point.capacity_est,
+            )
+        elif res["is_drain"]:
+            db_manager.save_event(
+                vehicle_id=point.vehicle_id,
+                event_type="DRAIN",
+                start_time=point.timestamp,
+                end_time=point.timestamp,
+                start_fuel=point.raw_fuel,
+                end_fuel=res["clean_fuel"],
+                change_liters=round(point.raw_fuel - res["clean_fuel"], 2),
+                lat=point.lat,
+                lng=point.lng,
+                address=point.address,
+                capacity_est=point.capacity_est,
+            )
+
+    return EnterpriseCleanResponse(**res, saved_to_db=saved_to_db)
+
+
+@app.post("/api/v1/clean-batch", response_model=List[EnterpriseCleanResponse], tags=["Enterprise API"])
+def enterprise_clean_batch(batch: EnterpriseBatchInput) -> List[EnterpriseCleanResponse]:
+    """
+    Endpoint chuẩn Doanh nghiệp: Xử lý hàng loạt theo mảng (10-500 điểm)
+    cho các thiết bị truyền dữ liệu theo cụm.
+    """
+    results = []
+    for pt in batch.points:
+        r = enterprise_clean_point(pt)
+        results.append(r)
+    return results
+
+
+@app.get("/api/v1/events", tags=["Enterprise API"])
+def get_vehicle_events(vehicle_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+    """Tra cứu các sự kiện đổ xăng hoặc nghi ngờ rút trộm dầu từ bảng CSDL 3NF."""
+    if not db_manager.enabled:
+        return []
+    return db_manager.get_events(vehicle_id=vehicle_id, limit=limit)
 
 
 @app.post("/api/v1/fuel/clean-point", response_model=CleanFuelOutput, tags=["Denoising Pipeline"])

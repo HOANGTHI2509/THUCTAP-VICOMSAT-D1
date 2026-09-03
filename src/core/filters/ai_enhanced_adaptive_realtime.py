@@ -369,14 +369,24 @@ def filter_ai_enhanced_adaptive_realtime(
         fast_step = (z - prev_z) >= max(event * 0.6, 5.5) or (z - prev2_z) >= max(event * 0.8, 7.5)
         min_refuel_jump = max(0.025 * capacity, event * 0.6, jitter * 4.0, 5.0)
         labeled_refuel = ai_state == "UPWARD_SHIFT" and float(confidence_values[i]) >= refuel_confidence
-        sustained_refuel = (
-            is_truly_parked
-            and observed > 5.0
+
+        # Thoát bẫy kẹt mức dưới: nếu raw cao hơn x vượt trội liên tục >= 4 nhịp (8 phút)
+        upward_trap_escape = (
+            (z - x >= max(0.12 * capacity, 15.0))
+            and (rise_count >= 4)
+        )
+
+        # Cập nhật luật xác nhận dịch mức tăng (đổ xăng thật):
+        # Không trói cứng vào xe đỗ nếu mức tăng là cú nhảy lớn (>= 10% bình hoặc >= 12L)
+        sustained_refuel = upward_trap_escape or (
+            observed > 5.0
             and (z - x) >= min_refuel_jump
             and rise_count >= 3
-            # Trôi chậm khi xe đỗ thường giống nhiễu cảm biến/nhiệt hơn là một dịch mức tăng thật.
-            # Vì vậy rule fallback causal còn yêu cầu phải có một bước nhảy raw đủ nhanh.
             and fast_step
+            and (
+                is_truly_parked
+                or (z - x >= max(0.10 * capacity, event * 1.2, 12.0))
+            )
         )
 
         is_refuel = (labeled_refuel and (fast_step or rise_count >= 2)) or (

@@ -17,11 +17,14 @@ project/dist/
 .DS_Store
 Thumbs.db
 
-# Data files (CSV, Excel, raw datasets)
+# Data files (CSV, Excel, raw datasets, databases)
 *.csv
 *.xlsx
 *.xls
 *.parquet
+*.db
+*.sqlite
+*.sqlite3
 TienXuLy/
 data/
 dulieu/
