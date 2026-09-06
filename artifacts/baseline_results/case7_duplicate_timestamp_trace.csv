@@ -1,0 +1,3 @@
+idx,fuel_time,gap_minutes,raw_z,speed,ai_state,confidence,x_before,x_after_rule,x_after,P_before,P_after,branch_selected,update_mode,R_selected,Q_selected,R_effective,Q_effective,K,adapt_action,fast_step,fast_step_th1,fast_step_th2,sustained_refuel,labeled_refuel,rise_count,drop_count,drain_count,recent_refuel_steps,dropout_count,capacity_est,flat_jitter,event_threshold
+0,2026-08-15T12:00:00,0.0,200.0,0.0,STABLE_JITTER,0.9962,,,200.0,4.0,4.0,init_first_valid,direct,,,,,,none,False,0.0,0.0,False,False,0,0,0,0,0,200.0,2.0,10.0
+0,2026-08-15T12:00:00,0.0,205.0,0.0,OSCILLATION_NOISE,0.6284,200.0,200.0,200.0,4.0,3.9851,oscillation_noise,frozen,1000.0,0.001,1000.0,0.001,0.004,hold_flat,False,6.0,8.0,False,False,1,0,0,0,0,200.0,2.0,10.0

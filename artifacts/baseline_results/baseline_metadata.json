@@ -1,0 +1,83 @@
+{
+  "git_commit": "a037f4e50324beefc7db2166fb28d77427357021",
+  "run_time": "2026-09-06 19:31:33",
+  "model": "models/fuel_state_classifier (RandomForest causal)",
+  "cases": {
+    "case_1_hill": {
+      "vehicle_id": "21H-03052",
+      "burn_in_points": 21,
+      "total_points": 55,
+      "pre_hill_baseline_x": 777.99,
+      "peak_raw": 849.9,
+      "peak_clean_x": 847.5,
+      "hill_error_liters": 69.51,
+      "status": "BASELINE_RECORDED (Hill error ~72.04 L detected)"
+    },
+    "case_2_sloshing": {
+      "vehicle_id": "21H-03221",
+      "total_points": 70,
+      "raw_std": 3.19,
+      "clean_std": 2.86,
+      "noise_reduction_pct": 10.5,
+      "status": "BASELINE_RECORDED"
+    },
+    "case_3_consumption": {
+      "vehicle_id": "29E-45520",
+      "total_points": 60,
+      "start_x": 141.4,
+      "end_x": 136.45,
+      "status": "BASELINE_RECORDED"
+    },
+    "case_4_dt300s": {
+      "vehicle_id": "20B-27762",
+      "dt_median_seconds": 300,
+      "total_points": 50,
+      "status": "BASELINE_RECORDED"
+    },
+    "case_5_zero_start_bug": {
+      "description": "Bản tin đầu tiên có fuel_level=0.0 khi context chưa có lịch sử",
+      "expected_bug": "UnboundLocalError on variable 'cap' at line 150 of state_manager.py",
+      "actual_result": "UnboundLocalError: cannot access local variable 'cap' where it is not associated with a value",
+      "status": "BASELINE_BUG_CONFIRMED"
+    },
+    "case_6_out_of_order_time": {
+      "input_times": [
+        "2026-08-15T10:00:00",
+        "2026-08-15T09:55:00"
+      ],
+      "time_gap_processed": [
+        0.0,
+        -5.0
+      ],
+      "notes": "Current code coerces negative gap to 2.0 minutes and processes as forward point",
+      "status": "BASELINE_RECORDED"
+    },
+    "case_7_duplicate_timestamp": {
+      "time_gaps": [
+        0.0,
+        0.0
+      ],
+      "outputs": [
+        200.0,
+        200.0
+      ],
+      "status": "BASELINE_RECORDED"
+    },
+    "case_8_interleaved_vehicles": {
+      "car_a_independent_match": true,
+      "status": "PASSED_INDEPENDENCE"
+    },
+    "case_9_context_update": {
+      "initial_capacity": 200.0,
+      "initial_event_threshold": 7.000000000000001,
+      "updated_capacity": 800.0,
+      "updated_event_threshold": 7.000000000000001,
+      "thresholds_were_recalculated": false,
+      "status": "BASELINE_BUG_CONFIRMED"
+    }
+  },
+  "event_detection_metrics": {
+    "status": "CHƯA_HỖ_TRỢ_TRONG_PIPELINE_HIỆN_TẠI",
+    "notes": "Pipeline hiện tại chỉ xuất đường hiển thị (x_after / clean_fuel), chưa có module độc lập mở nghi vấn và xác nhận sự kiện."
+  }
+}

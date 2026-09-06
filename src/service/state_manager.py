@@ -140,6 +140,7 @@ class StreamingStateManager:
         segment_id: Optional[str] = None,
         capacity_est: Optional[float] = None,
         noise_sigma_liters: Optional[float] = None,
+        trace_collector: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Process a single incoming telemetry data point through Causal AI + Kalman filter."""
         t_start = time.perf_counter()
@@ -276,9 +277,12 @@ class StreamingStateManager:
             "QualityReason": "FUEL_ZERO" if fuel_level <= 0 else "VALID",
         }])
 
+        cfg_filter = {"source_col": "FuelLevel"}
+        if trace_collector is not None:
+            cfg_filter["trace_collector"] = trace_collector
         clean_fuels, next_state = filter_ai_enhanced_adaptive_realtime(
             pt_df,
-            config={"source_col": "FuelLevel"},
+            config=cfg_filter,
             state=ctx.kalman_state,
             return_state=True,
         )
