@@ -14,8 +14,10 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 # Custom Imports (Chỉ 2 thuật toán: Kalman truyền thống và AI-Enhanced Kalman Realtime)
 from src.core.filters import kalman_traditional as kalman
 from src.core.filters.ai_enhanced_adaptive_realtime import filter_ai_enhanced_adaptive_realtime
+from src.core.filters.legacy_ai_adaptive_realtime import filter_legacy_ai_adaptive_realtime
 from src.core.filters.ai_state_filter import filter_with_ai_state, load_fuel_state_classifier
 from src.core.filters.anomaly_detector import FuelAnomalyDetector
+from src.service.state_manager import StreamingStateManager
 
 
 def is_valid_measurement(val, feature_status=""):
@@ -33,6 +35,55 @@ def load_ai_state_model():
 
 
 ai_state_model, ai_state_metadata = load_ai_state_model()
+
+
+def _optional_float(row, *columns):
+    """Return the first valid coordinate-like value without treating NaN as GPS."""
+    for column in columns:
+        if column in row.index:
+            value = pd.to_numeric(row[column], errors="coerce")
+            if pd.notna(value):
+                return float(value)
+    return None
+
+
+def _finite_or(value, default=0.0):
+    value = pd.to_numeric(value, errors="coerce")
+    return float(value) if pd.notna(value) and np.isfinite(value) else float(default)
+
+
+@st.cache_data(show_spinner=False)
+def replay_streaming_pipeline(frame: pd.DataFrame, vehicle_id: str, capacity_est: float, noise_sigma_liters: float) -> pd.DataFrame:
+    """Replay the production streaming path point-by-point, including its state."""
+    manager = StreamingStateManager()
+    result_rows = []
+    for _, row in frame.iterrows():
+        fuel_time = pd.Timestamp(row["FuelTime"])
+        reply = manager.process_point(
+            vehicle_id=vehicle_id,
+            fuel_time=fuel_time.to_pydatetime(),
+            fuel_level=_finite_or(row.get("FuelLevel"), np.nan),
+            speed=_finite_or(row.get("Speed", 0.0)),
+            lat=_optional_float(row, "Lat", "Latitude"),
+            lng=_optional_float(row, "Lng", "Longitude"),
+            distance_meters=_finite_or(row.get("DistanceMeters", 0.0)),
+            segment_id=str(row.get("SegmentID", "")),
+            capacity_est=float(capacity_est),
+            noise_sigma_liters=float(noise_sigma_liters),
+        )
+        result_rows.append(reply)
+    replay = pd.DataFrame(result_rows, index=frame.index)
+    output = frame.copy()
+    mapping = {
+        "AI_Enhanced_Kalman_Realtime": "clean_fuel_liters", "AI_State": "ai_signal_state",
+        "AI_State_Confidence": "confidence", "QualityReason": "quality_flag",
+        "RollingStd": "rolling_std", "TimeGapMinutes": "time_gap_minutes",
+        "capacity_est": "capacity_est", "noise_sigma_liters": "noise_sigma_liters",
+        "flat_jitter_threshold": "flat_jitter_threshold", "event_threshold": "event_threshold",
+    }
+    for target, source in mapping.items():
+        output[target] = replay[source] if source in replay else np.nan
+    return output
 
 # --- CONFIGURATION ---
 st.set_page_config(page_title="Vcomsat Fuel Dashboard", layout="wide", initial_sidebar_state="expanded")
@@ -206,6 +257,8 @@ if df.empty:
 with st.sidebar:
     st.markdown("---")
     ai_filter_mode = st.radio("Chế độ:", ["realtime", "offline"], index=0, help="realtime: thuần nhân quả (causal) không nhìn tương lai. offline: tham chiếu nhìn tương lai.")
+    if ai_filter_mode == "realtime":
+        st.caption("Realtime replay chạy đúng StreamingStateManager: feature → RF → state → Adaptive Kalman từng bản tin.")
     st.markdown("---")
     st.header("📏 Chọn Phân Đoạn")
     segment_options = ["Toàn bộ dữ liệu trong khoảng thời gian (All)"] + list(df['SegmentID'].dropna().unique())
@@ -263,6 +316,8 @@ with st.sidebar:
     )
 
     st.subheader("🧠 Cấu hình AI-Enhanced Kalman")
+    if ai_filter_mode == "realtime":
+        st.caption("Các giá trị dưới đây chỉ tác động đường Legacy đối sánh. Đường realtime dùng cấu hình production trong StreamingStateManager.")
     with st.expander("Tùy chỉnh R & Q theo Nhãn AI", expanded=False):
         st.markdown("**1. UNKNOWN (Mặc định)**")
         col1, col2 = st.columns(2)
@@ -312,8 +367,22 @@ with st.sidebar:
     }
 
 with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
+    # Cache one replay for the *entire* vehicle.  The calendar/segment controls
+    # below merely select rows from this already-warmed streaming timeline.
+    # This avoids rebuilding state every time the observer changes a date.
+    if ai_filter_mode == "realtime":
+        full_stream_replay = replay_streaming_pipeline(
+            df_all.sort_values(["FuelTime"], kind="stable"),
+            selected_car,
+            float(vehicle_profile.capacity_est),
+            float(vehicle_profile.noise_sigma_liters),
+        )
+        df_seg = full_stream_replay.loc[display_indices].copy()
+        df_seg["_DisplayRow"] = True
+        df_seg["_OriginalOrder"] = np.arange(len(df_seg))
     df_seg['Custom_Kalman'] = np.nan
-    df_seg['AI_Enhanced_Kalman_Realtime'] = np.nan
+    if ai_filter_mode == "offline":
+        df_seg['AI_Enhanced_Kalman_Realtime'] = np.nan
     
     def apply_by_segment(frame, operation):
         """Run a transform per segment without losing SegmentID on pandas 2.x/3.x."""
@@ -326,13 +395,14 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
             result["SegmentID"] = segment_by_row.reindex(result.index).fillna(0)
         return result
 
-    # 1. Tiền xử lý dị thường vật lý
-    if ai_filter_mode == "offline":
+    # Realtime uses exactly the production state manager.  Offline remains a
+    # separate reference because it may use future observations.
+    if ai_filter_mode == "realtime":
+        df_seg["CleanedFuel"] = df_seg["FuelLevel"]
+        df_seg["FuelAnomalyType"] = "STREAMING_REPLAY"
+    else:
         anomaly_detector = FuelAnomalyDetector(capacity=estimated_capacity)
         df_seg = apply_by_segment(df_seg, lambda g: anomaly_detector.detect_and_clean(g))
-    else:
-        df_seg["CleanedFuel"] = df_seg["FuelLevel"]
-        df_seg["FuelAnomalyType"] = "NORMAL"
     
     if "Acceleration" not in df_seg.columns:
         if "Speed" in df_seg.columns:
@@ -342,8 +412,9 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         else:
             df_seg["Acceleration"] = 0.0
 
-    # 2. Trích đặc trưng & Phân loại trạng thái AI
-    if ai_state_model is not None and ai_state_metadata is not None:
+    # Offline reference calculates batch features/labels.  Realtime labels and
+    # features above were generated by StreamingStateManager from past points.
+    if ai_filter_mode == "offline" and ai_state_model is not None and ai_state_metadata is not None:
         df_seg = apply_by_segment(
             df_seg,
             lambda group: filter_with_ai_state(
@@ -354,7 +425,7 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
                 mode=ai_filter_mode,
             ),
         )
-    else:
+    elif ai_filter_mode == "offline":
         df_seg["AI_State"] = "MODEL_NOT_FOUND"
         df_seg["AI_State_Raw"] = "MODEL_NOT_FOUND"
         df_seg["AI_State_Confidence"] = np.nan
@@ -395,9 +466,14 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         
         df_seg.loc[group.index, 'Custom_Kalman'] = kalman_std_vals
 
-        # 3.2. AI-Enhanced Kalman (Realtime / Causal)
+        # 3.2. Offline reference invokes the filter directly.  In realtime the
+        # current result was already generated point-by-point by the manager.
         df_seg_subset = df_seg.loc[group.index]
-        df_seg.loc[group.index, 'AI_Enhanced_Kalman_Realtime'] = filter_ai_enhanced_adaptive_realtime(df_seg_subset, config=ai_kalman_config)
+        if ai_filter_mode == "offline":
+            df_seg.loc[group.index, 'AI_Enhanced_Kalman_Realtime'] = filter_ai_enhanced_adaptive_realtime(df_seg_subset, config=ai_kalman_config)
+
+        # 3.3. Legacy AI-Enhanced Kalman (Đường đối sánh - Bản cũ)
+        df_seg.loc[group.index, 'AI_Enhanced_Kalman_Legacy'] = filter_legacy_ai_adaptive_realtime(df_seg_subset, config=ai_kalman_config)
 # Restore original order just in case
 df_seg = df_seg.sort_values("_OriginalOrder", kind="stable").drop(columns="_OriginalOrder")
 # Hide burn-in context after every derived column has been calculated.
@@ -418,7 +494,7 @@ st.markdown("### 📈 Biểu đồ Đấu trường Thuật toán (Đã Fix Inde
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
                     vertical_spacing=0.05,
                     specs=[[{"secondary_y": True}], [{}], [{}]],
-                    subplot_titles=("1. Đối chứng: Mức Nhiên Liệu Gốc vs Kalman Truyền Thống & AI-Enhanced Realtime", "2. Tốc độ di chuyển", "3. Độ nhiễu cục bộ (Rolling Std)"),
+                    subplot_titles=("1. Đối chứng: Mức Nhiên Liệu Gốc vs Kalman Truyền Thống vs Bản Cũ vs Bản Cải Tiến", "2. Tốc độ di chuyển", "3. Độ nhiễu cục bộ (Rolling Std)"),
                     row_heights=[0.6, 0.2, 0.2])
 
 # 1. Fuel Plot & Custom Algorithm Traces
@@ -434,15 +510,24 @@ for seg_id, group in df_seg.groupby('SegmentID', sort=False):
     # 2. Kalman Filter Truyen Thong
     fig.add_trace(go.Scatter(
         x=group['FuelTime'], y=group['Custom_Kalman'], 
-        mode='lines', name=f'Kalman Filter Truyền Thống (R={kalman_r})', legendgroup='kalman', showlegend=show_legend,
-        line=dict(color='#00CC96', width=2), connectgaps=True
+        mode='lines', name=f'Kalman Truyền Thống (R={kalman_r})', legendgroup='kalman', showlegend=show_legend,
+        line=dict(color='#00CC96', width=1.8), connectgaps=True
     ), row=1, col=1, secondary_y=False)
 
-    # 3. AI-Enhanced Kalman Realtime / Causal (Thuật toán chính)
+    # 3. AI-Enhanced Kalman Cũ (Legacy - Đường đối sánh)
+    if 'AI_Enhanced_Kalman_Legacy' in group.columns:
+        fig.add_trace(go.Scatter(
+            x=group['FuelTime'], y=group['AI_Enhanced_Kalman_Legacy'],
+            mode='lines', name='Bản Cũ (Legacy AI-Kalman)',
+            legendgroup='ai_enhanced_kalman_legacy', showlegend=show_legend,
+            line=dict(color='#AB63FA', width=2.0, dash='dot'), connectgaps=True
+        ), row=1, col=1, secondary_y=False)
+
+    # 4. AI-Enhanced Kalman Hiện Tại (Bản Cải Tiến: Candidate + Recovery)
     if 'AI_Enhanced_Kalman_Realtime' in group.columns:
         fig.add_trace(go.Scatter(
             x=group['FuelTime'], y=group['AI_Enhanced_Kalman_Realtime'],
-            mode='lines', name='AI-Enhanced Kalman (Realtime / Causal)',
+            mode='lines', name='Bản Cải Tiến Hiện Tại (Candidate + Recovery)',
             legendgroup='ai_enhanced_kalman_realtime', showlegend=show_legend,
             line=dict(color='#FF7F0E', width=2.5), connectgaps=True
         ), row=1, col=1, secondary_y=False)

@@ -95,8 +95,8 @@ class EnterprisePointInput(BaseModel):
 class EnterpriseCleanResponse(BaseModel):
     vehicle_id: str
     timestamp: str
-    raw_fuel: float
-    clean_fuel: float
+    raw_fuel: Optional[float] = None
+    clean_fuel: Optional[float] = None
     speed: float
     ai_state: str
     ai_state_desc: str
@@ -134,8 +134,8 @@ class CleanFuelOutput(BaseModel):
 
     vehicle_id: str = Field(..., alias="VehicleID")
     fuel_time: str = Field(..., alias="FuelTime")
-    raw_fuel_liters: float = Field(..., alias="RawFuel")
-    clean_fuel_liters: float = Field(..., alias="CleanFuel")
+    raw_fuel_liters: Optional[float] = Field(None, alias="RawFuel")
+    clean_fuel_liters: Optional[float] = Field(None, alias="CleanFuel")
     ai_signal_state: str = Field(..., alias="AI_State")
     confidence: float = Field(..., alias="Confidence")
     quality_flag: str = Field(..., alias="QualityFlag")

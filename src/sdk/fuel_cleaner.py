@@ -90,13 +90,13 @@ class FuelCleanerEngine:
 
         # Lấy giá trị sạch trước đó của xe để phát hiện bước nhảy
         ctx = self.state_manager.get_or_create_context(vehicle_id, capacity_est=capacity_est)
-        prev_clean = ctx.last_clean_fuel if ctx.last_clean_fuel is not None else float(raw_fuel)
+        prev_clean = ctx.last_clean_fuel
 
         # Chạy pipeline AI + Adaptive Kalman qua StreamingStateManager
         res = self.state_manager.process_point(
             vehicle_id=vehicle_id,
             fuel_time=dt,
-            fuel_level=float(raw_fuel),
+            fuel_level=float(raw_fuel) if raw_fuel is not None and not (isinstance(raw_fuel, float) and math.isnan(raw_fuel)) else 0.0,
             speed=float(speed) if speed is not None else 0.0,
             distance_meters=float(distance_m) if distance_m is not None else 0.0,
             lat=lat,
@@ -104,18 +104,26 @@ class FuelCleanerEngine:
             capacity_est=capacity_est,
         )
 
-        clean_val = float(res.get("clean_fuel_liters", raw_fuel))
+        clean_liters = res.get("clean_fuel_liters")
+        clean_val = float(clean_liters) if clean_liters is not None else None
         ai_state = str(res.get("ai_signal_state", "STABLE_JITTER"))
         conf = float(res.get("confidence", 1.0))
         ai_state_desc = AI_STATE_DESCRIPTIONS.get(ai_state, "Ổn định")
 
         # Xác định các cờ biến cố
-        is_refuel = (ai_state == "UPWARD_SHIFT") or ((clean_val - prev_clean) >= 5.0)
-        is_drain = (ai_state == "DOWNWARD_SHIFT") and ((prev_clean - clean_val) >= 8.0)
-        is_spike = (ai_state == "OSCILLATION_NOISE") and (abs(float(raw_fuel) - clean_val) >= 2.5)
+        if clean_val is not None and prev_clean is not None:
+            is_refuel = (ai_state == "UPWARD_SHIFT") or ((clean_val - prev_clean) >= 5.0)
+            is_drain = (ai_state == "DOWNWARD_SHIFT") and ((prev_clean - clean_val) >= 8.0)
+            is_spike = (ai_state == "OSCILLATION_NOISE") and (abs(float(raw_fuel) - clean_val) >= 2.5)
+        else:
+            is_refuel = False
+            is_drain = False
+            is_spike = False
 
         # Nhãn tiếng Việt tóm tắt biến cố
-        if is_refuel:
+        if clean_val is None:
+            event_label = "Chưa có ước lượng"
+        elif is_refuel:
             event_label = "Đổ xăng"
         elif is_drain:
             event_label = "Nghi rút trộm dầu"
@@ -131,8 +139,8 @@ class FuelCleanerEngine:
         return {
             "vehicle_id": vehicle_id,
             "timestamp": dt.strftime("%Y-%m-%d %H:%M:%S"),
-            "raw_fuel": round(float(raw_fuel), 2),
-            "clean_fuel": round(clean_val, 2),
+            "raw_fuel": round(float(raw_fuel), 2) if raw_fuel is not None else None,
+            "clean_fuel": round(clean_val, 2) if clean_val is not None else None,
             "speed": round(float(speed), 1) if speed is not None else 0.0,
             "ai_state": ai_state,
             "ai_state_desc": ai_state_desc,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 
 
 
@@ -42,34 +42,6 @@ class RealtimeAdaptiveKalmanState:
     dropout_recovery_count: int = 0
     dropout_seen_near_zero: bool = False
 
-    # Máy trạng thái ứng viên mức tăng (Candidate Level Tracking)
-    candidate_anchor: float | None = None               # Mức nền x trước khi bắt đầu sự kiện tăng
-    candidate_event_start_time: str | None = None        # Timestamp bắt đầu sự kiện tăng đầu tiên
-    candidate_plateau_start_time: str | None = None      # Timestamp bắt đầu mặt bằng hiện tại
-    candidate_plateau_center: float | None = None        # Mức tâm tham chiếu của mặt bằng (để chống trôi dốc)
-    candidate_level: float | None = None                # Mức đại diện hiện tại (median của samples)
-    candidate_count: int = 0                            # Số mẫu hợp lệ trong mặt bằng hiện tại
-    candidate_samples: list[float] = field(default_factory=list) # Danh sách mẫu hợp lệ của mặt bằng
-    candidate_sample_times: list[str | None] = field(default_factory=list) # Danh sách timestamp của từng mẫu trong mặt bằng
-    candidate_sample_ai: list[bool] = field(default_factory=list) # Nhãn AI của từng mẫu trong mặt bằng
-    candidate_ai_confirm_count: int = 0                 # Số mẫu có ai_state == UPWARD_SHIFT trong mặt bằng
-    candidate_step_count: int = 0                       # Số bậc tăng trong sự kiện
-    candidate_recovery_count: int = 0                   # Số mẫu hồi phục về gần nền cũ (để hủy sau 2 mẫu)
-    candidate_confirmed_level: float | None = None      # Mức đã xác nhận gần nhất (khống chế ân hạn)
-    dt_expected_minutes: float = 2.0                    # Chu kỳ kỳ vọng giữa các bản tin hợp lệ
-
-    # Máy trạng thái phục hồi sau nhiễu (Noise Recovery Branch - U-shape)
-    recovery_pre_event_level: float | None = None       # Mức nền x trước khi xảy ra cú tụt / đáy U
-    recovery_pre_event_time: str | None = None          # Timestamp mức nền trước cú tụt
-    recovery_bottom_anchor: float | None = None         # Mức đáy đo thấp nhất ghi nhận (nhận biết rời đáy)
-    recovery_bottom_time: str | None = None             # Timestamp lúc ở đáy đo
-    recovery_samples: list[float] = field(default_factory=list) # Danh sách mẫu cụm phục hồi rời đáy
-    recovery_sample_times: list[str | None] = field(default_factory=list) # Timestamp các mẫu phục hồi
-    recovery_elapsed_sec: float = 0.0                   # Thời gian tích lũy có bằng chứng phục hồi hợp lệ
-    recovery_active: bool = False                       # Cờ nhánh phục hồi đang hoạt động
-    tracking_samples: list[float] = field(default_factory=list)
-    tracking_times: list[str] = field(default_factory=list)
-
     def to_dict(self) -> dict:
         return asdict(self)
 
@@ -84,81 +56,6 @@ def _as_timestamp(value) -> pd.Timestamp | None:
         return None
     timestamp = pd.to_datetime(value, errors="coerce")
     return None if pd.isna(timestamp) else timestamp
-
-
-def _clear_recovery_state(state: RealtimeAdaptiveKalmanState) -> None:
-    """Xóa sạch trạng thái phục hồi sau nhiễu."""
-    state.recovery_pre_event_level = None
-    state.recovery_pre_event_time = None
-    state.recovery_bottom_anchor = None
-    state.recovery_bottom_time = None
-    state.recovery_samples.clear()
-    state.recovery_sample_times.clear()
-    state.recovery_elapsed_sec = 0.0
-    state.recovery_active = False
-
-
-def _clear_pending_candidate(state: RealtimeAdaptiveKalmanState) -> None:
-    """Xóa sạch trạng thái ứng viên đang chờ xác nhận, giữ nguyên candidate_confirmed_level."""
-    state.candidate_anchor = None
-    state.candidate_event_start_time = None
-    state.candidate_plateau_start_time = None
-    state.candidate_plateau_center = None
-    state.candidate_level = None
-    state.candidate_count = 0
-    state.candidate_samples.clear()
-    state.candidate_sample_times.clear()
-    state.candidate_sample_ai.clear()
-    state.candidate_ai_confirm_count = 0
-    state.candidate_step_count = 0
-    state.candidate_recovery_count = 0
-
-
-def _reset_plateau(
-    state: RealtimeAdaptiveKalmanState,
-    z: float,
-    current_time: pd.Timestamp | None,
-    ai_state: str,
-) -> None:
-    """Khởi động lại một mặt bằng đo lường mới (khi bắt đầu hoặc khi dời mặt bằng)."""
-    time_str = current_time.isoformat() if current_time is not None else None
-    state.candidate_plateau_start_time = time_str
-    state.candidate_plateau_center = float(z)
-    state.candidate_level = float(z)
-    state.candidate_samples = [float(z)]
-    state.candidate_sample_times = [time_str]
-    is_ai = (ai_state == "UPWARD_SHIFT")
-    state.candidate_sample_ai = [is_ai]
-    state.candidate_count = 1
-    state.candidate_ai_confirm_count = 1 if is_ai else 0
-    state.candidate_recovery_count = 0
-
-
-def _add_sample_to_plateau(
-    state: RealtimeAdaptiveKalmanState,
-    z: float,
-    current_time: pd.Timestamp | None,
-    ai_state: str,
-    max_samples: int = 15,
-) -> None:
-    """Bổ sung một mẫu vào mặt bằng hiện tại; cắt đuôi FIFO để khống chế bộ nhớ và cập nhật lại metrics."""
-    time_str = current_time.isoformat() if current_time is not None else None
-    is_ai = (ai_state == "UPWARD_SHIFT")
-    state.candidate_samples.append(float(z))
-    state.candidate_sample_times.append(time_str)
-    state.candidate_sample_ai.append(is_ai)
-
-    if len(state.candidate_samples) > max_samples:
-        state.candidate_samples.pop(0)
-        state.candidate_sample_times.pop(0)
-        state.candidate_sample_ai.pop(0)
-        if state.candidate_sample_times and state.candidate_sample_times[0] is not None:
-            state.candidate_plateau_start_time = state.candidate_sample_times[0]
-
-    state.candidate_count = len(state.candidate_samples)
-    state.candidate_ai_confirm_count = sum(state.candidate_sample_ai)
-    state.candidate_level = float(np.median(state.candidate_samples))
-
 
 
 # Xóa toàn bộ memory ngắn hạn của bộ lọc khi đổi segment hoặc khoảng cách thời gian quá lớn.
@@ -176,11 +73,6 @@ def _reset_state(state: RealtimeAdaptiveKalmanState) -> None:
     state.dropout_count = 0
     state.dropout_recovery_count = 0
     state.dropout_seen_near_zero = False
-    _clear_pending_candidate(state)
-    state.candidate_confirmed_level = None
-    _clear_recovery_state(state)
-    state.tracking_samples.clear()
-    state.tracking_times.clear()
 
 
 def _capture_trace(
@@ -379,14 +271,6 @@ def filter_ai_enhanced_adaptive_realtime(
             x_before_step = np.nan
             P_before_step = 4.0
 
-        # Cập nhật chu kỳ lấy mẫu kỳ vọng dt_expected (chỉ cập nhật khi gap nằm trong khoảng bình thường 0.2 - 10.0 phút)
-        # Khoảng trống lớn đơn lẻ (> 10 phút) KHÔNG được phép nâng dt_expected.
-        if 0.2 <= gap_minutes <= 10.0:
-            stream_state.dt_expected_minutes = 0.85 * stream_state.dt_expected_minutes + 0.15 * gap_minutes
-        cfg_dt = config.get("dt_expected_minutes", config.get("expected_dt_minutes"))
-        dt_expected = float(cfg_dt) if cfg_dt is not None else stream_state.dt_expected_minutes
-        max_plateau_gap = max(2.5 * dt_expected, 7.5)
-
         is_qflag_zero = (
             any(reason in qreason for reason in {"FUEL_ZERO", "SENSOR_DROPOUT", "DROPOUT"})
             or (z <= 1.0 and qflag in {"1", "1.0"})
@@ -410,27 +294,6 @@ def filter_ai_enhanced_adaptive_realtime(
         current_speed = max(float(speed[i]), 0.0)
         high_noise = float(rolling_std[i]) >= max(jitter * 1.5, noise * 3.0)
         observed = observed_fuel[i] if not pd.isna(observed_fuel[i]) else z
-
-        # Bằng chứng cục bộ, độc lập với RollingStd còn chứa gai/đáy cũ.
-        if (current_time is None or not np.isfinite(z) or z <= 5.0
-                or is_qflag_zero or ai_state == "IMPULSE_NOISE"
-                or gap_minutes <= 0 or gap_minutes > max_plateau_gap):
-            stream_state.tracking_samples.clear()
-            stream_state.tracking_times.clear()
-        if (current_time is not None and np.isfinite(z) and z > 5.0
-                and not is_qflag_zero and ai_state != "IMPULSE_NOISE"):
-            stream_state.tracking_samples.append(float(z))
-            stream_state.tracking_times.append(current_time.isoformat())
-            stream_state.tracking_samples = stream_state.tracking_samples[-6:]
-            stream_state.tracking_times = stream_state.tracking_times[-6:]
-        local_samples = stream_state.tracking_samples
-        local_level = float(np.median(local_samples)) if local_samples else float(z)
-        local_duration = 0.0
-        if len(local_samples) >= 2:
-            local_duration = (pd.Timestamp(stream_state.tracking_times[-1])
-                              - pd.Timestamp(stream_state.tracking_times[0])).total_seconds() / 60.0
-        local_stable = (len(local_samples) >= 3 and local_duration >= 4.0
-                        and np.ptp(local_samples) <= max(noise * 2.0, 1.0))
 
         # PENDING_DRAIN: khi thấy một cú tụt sâu, trước tiên giữ output ở mức nền vật lý cũ.
         # Chỉ khi nhiều điểm thấp liên tiếp đến với chu kỳ lấy mẫu bình thường thì mới xác nhận giảm thật.
@@ -490,10 +353,6 @@ def filter_ai_enhanced_adaptive_realtime(
         )
 
         if is_zero_dropout:
-            stream_state.tracking_samples.clear()
-            stream_state.tracking_times.clear()
-            _clear_recovery_state(stream_state)
-            _clear_pending_candidate(stream_state)
             if not pd.isna(last_valid_x) and last_valid_x > 3.0:
                 dropout_anchor = last_valid_x
                 dropout_count = 1
@@ -517,7 +376,6 @@ def filter_ai_enhanced_adaptive_realtime(
             enhanced[i] = x
             previous_raw_2 = previous_raw
             previous_raw = float(z)
-            _clear_pending_candidate(stream_state)
             _capture_trace(trace_collector, i, current_time, gap_minutes, z, current_speed, ai_state, float(confidence_values[i]), x_before_step, None, x, P_before_step, P, "init_first_valid", "direct", capacity_est=capacity, flat_jitter=jitter, event_threshold=event, rise_count=rise_count, drop_count=drop_count, drain_count=drain_count, recent_refuel_steps=recent_refuel_steps, dropout_count=dropout_count)
             continue
 
@@ -560,8 +418,6 @@ def filter_ai_enhanced_adaptive_realtime(
             is_truly_parked
             and ai_state not in {"UPWARD_SHIFT", "DOWNWARD_SHIFT"}
             and recent_refuel_steps == 0
-            and not (local_stable and len(local_samples) >= 6
-                     and local_duration >= 10.0 and local_level > x + jitter)
             and abs(z - x) <= max(jitter * 2.0, 1.8)
             and (high_noise or ai_state in {"OSCILLATION_NOISE", "IMPULSE_NOISE"})
         )
@@ -582,228 +438,50 @@ def filter_ai_enhanced_adaptive_realtime(
 
         # 1. Xác định nhiễu xung (IMPULSE_NOISE / spike)
         is_spike = (ai_state == "IMPULSE_NOISE")
-        if is_spike:
-            _clear_recovery_state(stream_state)
 
         # 2. Phục hồi causal khi bị "treo" trạng thái: xe đỗ, raw đã tụt >= 3 nhịp nhưng x vẫn nằm cao.
         trap_recovery = (
             is_truly_parked
-            and local_stable
             and (ai_state == "STABLE_JITTER")
             and (x - z >= max(event * 0.5, jitter * 2.5, 3.0))
             and (drop_count >= 3)
         )
 
-        # 2.1. Quản lý trạng thái phục hồi sau nhiễu / đáy chữ U (Noise Recovery Branch)
-        if gap_minutes > max_plateau_gap:
-            _clear_recovery_state(stream_state)
-
-        if drain_count >= 2:
-            _clear_recovery_state(stream_state)
-
-        if not is_spike and not is_zero_dropout:
-            if stream_state.recovery_pre_event_level is None:
-                # Nhận diện cú tụt sâu khỏi nền x hiện tại (khởi đầu đáy U)
-                if z < x - max(jitter * 2.5, 3.0):
-                    stream_state.recovery_pre_event_level = float(x)
-                    stream_state.recovery_pre_event_time = current_time.isoformat() if current_time is not None else None
-                    stream_state.recovery_bottom_anchor = float(z)
-                    stream_state.recovery_bottom_time = stream_state.recovery_pre_event_time
-            else:
-                # Cập nhật đáy nếu tiếp tục tụt sâu hơn
-                if stream_state.recovery_bottom_anchor is not None and z < stream_state.recovery_bottom_anchor:
-                    stream_state.recovery_bottom_anchor = float(z)
-                    stream_state.recovery_bottom_time = current_time.isoformat() if current_time is not None else None
-                    stream_state.recovery_samples.clear()
-                    stream_state.recovery_sample_times.clear()
-                    stream_state.recovery_elapsed_sec = 0.0
-                    stream_state.recovery_active = False
-                elif stream_state.recovery_bottom_anchor is not None and z <= stream_state.recovery_bottom_anchor + max(jitter * 1.0, 1.2):
-                    # Còn nằm sát đáy: không gọi là phục hồi, xóa mẫu đang gom
-                    stream_state.recovery_samples.clear()
-                    stream_state.recovery_sample_times.clear()
-                    stream_state.recovery_elapsed_sec = 0.0
-                    stream_state.recovery_active = False
-                elif stream_state.recovery_bottom_anchor is not None and z >= stream_state.recovery_bottom_anchor + max(jitter * 1.8, 3.0):
-                    # Bằng chứng rời đáy rõ ràng! Kiểm tra không phải nhảy nạp vượt nền cũ
-                    if z < stream_state.recovery_pre_event_level + max(jitter * 1.5, 2.5):
-                        stream_state.recovery_samples.append(float(z))
-                        t_str = current_time.isoformat() if current_time is not None else None
-                        stream_state.recovery_sample_times.append(t_str)
-                        if len(stream_state.recovery_samples) > 10:
-                            stream_state.recovery_samples.pop(0)
-                            stream_state.recovery_sample_times.pop(0)
-
-                        if len(stream_state.recovery_samples) >= 3:
-                            dur_r = 0.0
-                            if current_time is not None and stream_state.recovery_sample_times[0] is not None:
-                                t_start = _as_timestamp(stream_state.recovery_sample_times[0])
-                                if t_start is not None:
-                                    dur_r = max(0.0, (current_time - t_start).total_seconds() / 60.0)
-                            r_spread = max(stream_state.recovery_samples) - min(stream_state.recovery_samples)
-                            if r_spread <= max(jitter * 2.2, 4.0) and dur_r >= 3.0:
-                                stream_state.recovery_active = True
-                                stream_state.recovery_elapsed_sec += max(gap_minutes, 0.0) * 60.0
-                            else:
-                                stream_state.recovery_active = False
-                                stream_state.recovery_elapsed_sec = 0.0
-                    else:
-                        # Vượt nền cũ: xuất hiện mức tăng mới, chuyển giao cho Candidate Level Tracking
-                        _clear_recovery_state(stream_state)
-
-        # 3. Máy trạng thái ứng viên mức tăng (Candidate Level Tracking)
-        # Thay thế hoàn toàn các luật cũ (sustained_refuel, upward_trap_escape, labeled_refuel trực tiếp)
-        # Ngưỡng bắt đầu ứng viên
+        # 3. Xác nhận dịch mức tăng (UPWARD_SHIFT; tên biến cũ còn dùng refuel).
+        # RF có thể gắn nhầm cạnh tăng của một mức tăng thật thành OSCILLATION_NOISE.
+        # Vì vậy hệ thống còn có rule causal độc lập: nếu xe đỗ và mức tăng duy trì qua nhiều nhịp,
+        # vẫn có thể xác nhận UPWARD_SHIFT mà không phụ thuộc hoàn toàn vào nhãn RF.
+        prev_z = float(raw[i - 1]) if i > 0 else (previous_raw if not pd.isna(previous_raw) else float(z))
+        prev2_z = float(raw[i - 2]) if i > 1 else (previous_raw_2 if not pd.isna(previous_raw_2) else prev_z)
+        fast_step = (z - prev_z) >= max(event * 0.6, 5.5) or (z - prev2_z) >= max(event * 0.8, 7.5)
         min_refuel_jump = max(0.025 * capacity, event * 0.6, jitter * 4.0, 5.0)
-        tol_plateau = max(jitter * 1.5, 2.5)
-        tol_anchor = max(jitter * 2.0, 3.0)
+        labeled_refuel = ai_state == "UPWARD_SHIFT" and float(confidence_values[i]) >= refuel_confidence
 
-        # 3.1. Kiểm tra gián đoạn thời gian lớn
-        if stream_state.candidate_anchor is not None and gap_minutes > max_plateau_gap:
-            if z >= stream_state.candidate_anchor + min_refuel_jump and not is_spike:
-                _reset_plateau(stream_state, z, current_time, ai_state)
-            else:
-                _clear_pending_candidate(stream_state)
-
-        # 3.2. Kiểm tra phục hồi về nền hoặc tụt dưới nền
-        skip_confirmation_this_step = False
-        if stream_state.candidate_anchor is not None:
-            if z < stream_state.candidate_anchor - tol_anchor:
-                # Tụt sâu dưới nền: hủy ứng viên ngay, nhường đường cho nhánh giảm
-                _clear_pending_candidate(stream_state)
-                skip_confirmation_this_step = True
-            elif abs(z - stream_state.candidate_anchor) <= tol_anchor:
-                # Mẫu gần nền đầu tiên: ngắt bằng chứng ổn định của mặt bằng cao
-                stream_state.candidate_recovery_count += 1
-                stream_state.candidate_samples.clear()
-                stream_state.candidate_sample_times.clear()
-                stream_state.candidate_sample_ai.clear()
-                stream_state.candidate_count = 0
-                stream_state.candidate_ai_confirm_count = 0
-                stream_state.candidate_plateau_start_time = None
-                if stream_state.candidate_recovery_count >= 2:
-                    _clear_pending_candidate(stream_state)
-                # QUAN TRỌNG: Mẫu đang hồi phục về nền không được đi tiếp đến xác nhận
-                skip_confirmation_this_step = True
-            else:
-                stream_state.candidate_recovery_count = 0
-
-        # 3.3. Quản lý mặt bằng ứng viên (bổ sung mẫu hoặc mở mặt bằng mới)
-        if not skip_confirmation_this_step:
-            if stream_state.candidate_anchor is None:
-                if z >= x + min_refuel_jump and not is_spike:
-                    stream_state.candidate_anchor = float(x)
-                    stream_state.candidate_event_start_time = current_time.isoformat() if current_time is not None else None
-                    stream_state.candidate_step_count = 1
-                    _reset_plateau(stream_state, z, current_time, ai_state)
-            else:
-                center = stream_state.candidate_plateau_center
-                if center is None:
-                    _reset_plateau(stream_state, z, current_time, ai_state)
-                elif abs(z - center) <= tol_plateau:
-                    _add_sample_to_plateau(stream_state, z, current_time, ai_state, max_samples=15)
-                elif z > center + tol_plateau:
-                    stream_state.candidate_step_count += 1
-                    _reset_plateau(stream_state, z, current_time, ai_state)
-                elif stream_state.candidate_anchor + tol_anchor < z < center - tol_plateau:
-                    _reset_plateau(stream_state, z, current_time, ai_state)
-
-        # 3.4. Đánh giá xác nhận dịch mức tăng
-        is_refuel = False
-        confirmed_target = None
-        if (
-            not skip_confirmation_this_step
-            and stream_state.candidate_anchor is not None
-            and stream_state.candidate_count >= 1
-            and not is_spike
-            and not is_zero_dropout
-        ):
-            # Cửa sổ xác nhận ổn định gần nhất: xét khoảng gần nhất có giới hạn (tối đa 5 mẫu)
-            win_k = min(len(stream_state.candidate_samples), 5)
-            win_samples = stream_state.candidate_samples[-win_k:]
-            win_times = stream_state.candidate_sample_times[-win_k:]
-            win_ai = stream_state.candidate_sample_ai[-win_k:]
-
-            win_duration_min = 0.0
-            if current_time is not None and win_times and win_times[0] is not None:
-                w_start = _as_timestamp(win_times[0])
-                if w_start is not None:
-                    win_duration_min = max(0.0, (current_time - w_start).total_seconds() / 60.0)
-
-            win_spread = max(win_samples) - min(win_samples) if win_samples else 0.0
-            mid = len(win_samples) // 2
-            half1 = win_samples[:mid]
-            half2 = win_samples[mid:]
-            level_diff_liters = abs(float(np.median(half2)) - float(np.median(half1))) if half1 and half2 else 0.0
-            win_level = float(np.median(win_samples))
-
-            # Ngoại lệ thử nghiệm: bước nhảy cực lớn khi xe chạy
-            is_large_jump = (
-                (win_level - stream_state.candidate_anchor) >= max(0.15 * capacity, 20.0)
-            )
-            context_valid = is_truly_parked or is_large_jump
-
-            # Ngưỡng chênh lệch và độ dốc (lỏng hơn khi xe nạp lớn rồi chạy trên đường có sóng sánh/tiêu hao)
-            max_level_diff_liters = max(jitter * 1.5, 2.5) if is_large_jump else max(jitter * 1.2, 2.0)
-            # Khoảng cách thời gian đại diện thực tế giữa hai nhóm (dùng mốc giữa của mỗi nửa)
-            dt_halves = 0.0
-            if len(win_times) >= 2 and win_times[0] is not None and win_times[-1] is not None:
-                t_mid1 = _as_timestamp(win_times[mid // 2])
-                t_mid2 = _as_timestamp(win_times[mid + (len(win_times) - mid) // 2])
-                if t_mid1 is not None and t_mid2 is not None:
-                    dt_halves = max(0.5, (t_mid2 - t_mid1).total_seconds() / 60.0)
-
-            win_slope = 0.0
-            if dt_halves > 0 and len(win_samples) >= 2:
-                win_slope = level_diff_liters / dt_halves
-            elif win_duration_min >= 2.0 and len(win_samples) >= 2:
-                win_slope = level_diff_liters / max(win_duration_min * 0.5, 1.0)
-            max_slope = max(jitter * 0.25, 0.45) if is_large_jump else max(jitter * 0.15, 0.20)
-            is_flat_slope = (win_slope <= max_slope) and (level_diff_liters <= max_level_diff_liters)
-
-            # Nhánh AI: đồng thuận với mô hình trong cửa sổ gần nhất
-            ai_consensus = (ai_state == "UPWARD_SHIFT" and sum(win_ai) >= 2)
-            ai_spread_ok = win_spread <= max(jitter * 2.0, 3.5)
-            can_confirm_ai = (
-                context_valid
-                and ai_consensus
-                and len(win_samples) >= 3
-                and win_duration_min >= 4.0
-                and ai_spread_ok
-                and is_flat_slope
-            )
-
-            # Nhánh rule: mặt bằng độc lập không có AI hỗ trợ trong cửa sổ gần nhất
-            rule_spread_ok = win_spread <= (max(jitter * 2.2, 4.0) if is_large_jump else max(jitter * 1.5, 2.5))
-            can_confirm_rule = (
-                context_valid
-                and len(win_samples) >= 4
-                and win_duration_min >= 6.0
-                and rule_spread_ok
-                and is_flat_slope
-            )
-
-            if can_confirm_ai or can_confirm_rule:
-                is_refuel = True
-                confirmed_target = win_level
-                stream_state.candidate_confirmed_level = confirmed_target
-                recent_refuel_steps = 2  # Tham số thử nghiệm ân hạn 2 mẫu
-                _clear_pending_candidate(stream_state)
-                _clear_recovery_state(stream_state)
-
-        # Hiệu chỉnh lệch thấp nhỏ không phải một lần nạp mới. Đòi hỏi
-        # sáu mẫu sạch và thời lượng đủ dài để không đi theo cạnh lên chữ U.
-        stable_rebound = (
-            local_stable and len(local_samples) >= 6 and local_duration >= 10.0
-            and jitter < local_level - x < min_refuel_jump
-            and not is_spike and not is_refuel
+        # Thoát bẫy kẹt mức dưới: nếu raw cao hơn x vượt trội liên tục >= 4 nhịp (8 phút)
+        upward_trap_escape = (
+            (z - x >= max(0.12 * capacity, 15.0))
+            and (rise_count >= 4)
         )
-        confirmed_drop = (
-            local_stable and drain_count >= 2
-            and ai_state == "DOWNWARD_SHIFT"
-            and float(confidence_values[i]) >= drain_min_confidence
-            and x - local_level >= max(jitter * 1.5, 1.0)
+
+        # Cập nhật luật xác nhận dịch mức tăng (đổ xăng thật):
+        # Không trói cứng vào xe đỗ nếu mức tăng là cú nhảy lớn (>= 10% bình hoặc >= 12L)
+        sustained_refuel = upward_trap_escape or (
+            observed > 5.0
+            and (z - x) >= min_refuel_jump
+            and rise_count >= 3
+            and fast_step
+            and (
+                is_truly_parked
+                or (z - x >= max(0.10 * capacity, event * 1.2, 12.0))
+            )
         )
+
+        is_refuel = (labeled_refuel and (fast_step or rise_count >= 2)) or (
+            is_truly_parked
+            and ai_state not in {"OSCILLATION_NOISE", "IMPULSE_NOISE"}
+            and (z - x >= min_refuel_jump)
+            and fast_step
+        ) or sustained_refuel or (recent_refuel_steps > 0 and (z - x) >= 1.5)
 
         # Chọn Q/R theo trạng thái cuối cùng đã được AI + rule/memory xác nhận.
         branch_selected = "unknown"
@@ -813,16 +491,6 @@ def filter_ai_enhanced_adaptive_realtime(
             Q_current = cfg_spike_q
             jump_to_z = False
             branch_selected = "is_spike"
-        elif confirmed_drop:
-            R, Q_current = cfg_drain_r, cfg_drain_q
-            confirmed_target = local_level
-            jump_to_z = True
-            branch_selected = "confirmed_downward_level"
-            _clear_recovery_state(stream_state)
-        elif stable_rebound:
-            R, Q_current = cfg_stable_r_very, max(cfg_stable_q, 1.0)
-            jump_to_z = False
-            branch_selected = "stable_level_rebound"
         elif trap_recovery:
             x_after_rule = x + 0.5 * (float(z) - x)
             x = x_after_rule
@@ -833,27 +501,19 @@ def filter_ai_enhanced_adaptive_realtime(
         elif is_refuel:
             R = cfg_ref_r
             Q_current = cfg_ref_q
-            recent_refuel_steps = 2
+            recent_refuel_steps = 4
             jump_to_z = True
             branch_selected = "is_refuel"
-        elif drain_count >= 2:
-            R = cfg_drain_r
-            Q_current = cfg_drain_q
-            jump_to_z = False
-            branch_selected = "drain_count>=2"
-        elif stream_state.recovery_active:
-            tau = 180.0  # 3 phút
-            R_floor = cfg_stable_r_very  # 15.0
-            # Cụm đã xác nhận phục hồi: không bắt đầu lại từ R của đáy nhiễu.
-            R = max(R_floor, min(cfg_slosh_r, cfg_cons_r) * np.exp(-stream_state.recovery_elapsed_sec / tau))
-            Q_current = max(cfg_cons_q, 1.0)
-            jump_to_z = False
-            branch_selected = "noise_recovery"
         elif ai_state == "OSCILLATION_NOISE" or high_noise:
             R = cfg_slosh_r
             Q_current = cfg_slosh_q
             jump_to_z = False
             branch_selected = "oscillation_noise"
+        elif drain_count >= 2:
+            R = cfg_drain_r
+            Q_current = cfg_drain_q
+            jump_to_z = False
+            branch_selected = "drain_count>=2"
         elif ai_state == "GRADUAL_CHANGE" or not is_truly_parked:
             R = cfg_cons_r
             Q_current = cfg_cons_q
@@ -871,9 +531,7 @@ def filter_ai_enhanced_adaptive_realtime(
         adapt_action = "none"
 
         # Thích nghi R và Q tự động theo độ dốc tiêu hao (bám sát dốc mượt mà không trễ)
-        if not is_spike and not jump_to_z and branch_selected not in {
-            "noise_recovery", "oscillation_noise", "stable_level_rebound"
-        }:
+        if not is_spike and not jump_to_z:
             if z < x - max(jitter * 0.4, 0.3):
                 if drain_count >= 2:
                     lag_ratio = max(1.0, (x - z) / jitter)
@@ -895,60 +553,27 @@ def filter_ai_enhanced_adaptive_realtime(
 
         # Cập nhật Kalman
         if jump_to_z:
-            if confirmed_target is not None:
-                x = float(confirmed_target)
-            else:
-                x = float(z)
+            x = float(z)
             P = 4.0
-            recent_refuel_steps = 2 if is_refuel else 0
+            recent_refuel_steps = 4
             update_mode = "direct"
             K_val = None
         else:
-            P_pred = P + Q_current
-            K = P_pred / (P_pred + R)
-            step_kalman = K * (z - x)
+            P = P + Q_current
+            K = P / (P + R)
+            x_new = x + K * (z - x)
+            P = (1 - K) * P
+            K_val = float(K)
 
-            if branch_selected in {"noise_recovery", "stable_level_rebound"}:
-                # Giới hạn tốc độ hiệu chỉnh chỉ trong nhánh phục hồi:
-                max_rate_l_per_min = max(jitter * 0.8, 1.5)  # L/phút
-                max_step_cap = max(jitter * 3.0, 5.0)        # L
-                max_step_allowed = min(max_rate_l_per_min * max(gap_minutes, 0.0), max_step_cap)
-                if abs(step_kalman) > max_step_allowed:
-                    ratio = max_step_allowed / max(abs(step_kalman), 1e-6)
-                    K_eff = ratio * K
-                    update_mode = "recovery_rate_limited"
-                else:
-                    K_eff = K
-                    update_mode = "recovery_kalman"
-
-                actual_step = K_eff * (z - x)
-                x = x + actual_step
-                P = (1.0 - K_eff) ** 2 * P_pred + K_eff ** 2 * R
-                K_val = float(K_eff)
-                adapt_action = branch_selected
-
-                # Thoát nhánh phục hồi khi x đã bám sát cụm mục tiêu
-                rec_target = float(np.median(stream_state.recovery_samples)) if stream_state.recovery_samples else z
-                if abs(x - rec_target) <= max(jitter * 0.4, 0.4):
-                    _clear_recovery_state(stream_state)
+            # KHÓA DÂNG ẢO VẬT LÝ KHI XE ĐANG ĐỖ / SÓNG SÁNH:
+            # Nếu không có UPWARD_SHIFT đã xác nhận, không cho x leo theo các "quả đồi" sóng sánh
+            if not is_refuel and recent_refuel_steps == 0 and z > x + jitter:
+                x = x  # Khóa phẳng xuyên qua các đợt sóng sánh dâng ảo
+                update_mode = "frozen"
+                adapt_action = adapt_action + "|hold_flat" if adapt_action != "none" else "hold_flat"
             else:
-                x_new = x + step_kalman
-                P = (1 - K) * P_pred
-                K_val = float(K)
-
-                # KHÓA DÂNG ẢO VẬT LÝ KHI XE ĐANG ĐỖ / SÓNG SÁNH:
-                if not is_refuel and recent_refuel_steps == 0 and z > x + jitter:
-                    x = x  # Khóa phẳng xuyên qua các đợt sóng sánh dâng ảo
-                    update_mode = "frozen"
-                    adapt_action = adapt_action + "|hold_flat" if adapt_action != "none" else "hold_flat"
-                elif recent_refuel_steps > 0 and stream_state.candidate_confirmed_level is not None and z > stream_state.candidate_confirmed_level + max(jitter * 1.8, 3.0):
-                    # Gai trong thời gian ân hạn: không cho x leo theo gai
-                    x = x
-                    update_mode = "frozen"
-                    adapt_action = adapt_action + "|grace_spike_hold" if adapt_action != "none" else "grace_spike_hold"
-                else:
-                    x = x_new  # Bám sát mượt mà dốc tiêu hao (không bị bậc thang vuông)
-                    update_mode = "kalman"
+                x = x_new  # Bám sát mượt mà dốc tiêu hao (không bị bậc thang vuông)
+                update_mode = "kalman"
 
         x = max(0.0, float(x))
         enhanced[i] = x
@@ -956,8 +581,8 @@ def filter_ai_enhanced_adaptive_realtime(
             trace_collector, i, current_time, gap_minutes, z, current_speed, ai_state, float(confidence_values[i]),
             x_before_step, x_after_rule, x, P_before_step, P,
             branch_selected, update_mode, R_selected, Q_selected, R_effective, Q_effective, K_val, adapt_action,
-            False, max(event * 0.6, 5.5), max(event * 0.8, 7.5),
-            is_refuel, (ai_state == "UPWARD_SHIFT"),
+            fast_step, max(event * 0.6, 5.5), max(event * 0.8, 7.5),
+            sustained_refuel, labeled_refuel,
             rise_count, drop_count, drain_count, recent_refuel_steps, dropout_count,
             capacity, jitter, event
         )
