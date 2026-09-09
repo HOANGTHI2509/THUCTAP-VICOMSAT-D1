@@ -16,7 +16,6 @@ const DEFAULT_ZOOM = 2;
 
 export default function RollingChart({ trip, points, cursor, windowSec, playing }: Props) {
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
-  const [showAdaptive, setShowAdaptive] = useState(false);
   
   const [hoverMouse, setHoverMouse] = useState<{ x: number, y: number } | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -91,18 +90,12 @@ export default function RollingChart({ trip, points, cursor, windowSec, playing 
               <span className="text-cockpit-400">Xăng gốc:</span>
               <span className="font-mono font-semibold text-fuel-raw">{hoverData.point.rawFuel.toFixed(1)} L</span>
             </div>
-            {hoverData.point.mlKalman !== undefined && (
-              <div className="flex justify-between gap-4">
-                <span className="text-cockpit-400">Random Forest:</span>
-                <span className="font-mono font-semibold text-blue-400">{hoverData.point.mlKalman.toFixed(1)} L</span>
-              </div>
-            )}
-            {showAdaptive && (
-              <div className="flex justify-between gap-4">
-                <span className="text-cockpit-400">Adaptive K.:</span>
-                <span className="font-mono font-semibold text-fuel-filter">{hoverData.point.adaptiveKalman.toFixed(1)} L</span>
-              </div>
-            )}
+            <div className="flex justify-between gap-4">
+              <span className="text-[#ab63fa] font-medium">Lọc AI:</span>
+              <span className="font-mono font-bold text-[#ab63fa]">
+                {(hoverData.point.aiSmoothTracking ?? hoverData.point.mlKalman ?? hoverData.point.adaptiveKalman).toFixed(1)} L
+              </span>
+            </div>
           </div>
         </>
       )}
@@ -110,24 +103,18 @@ export default function RollingChart({ trip, points, cursor, windowSec, playing 
       <div className="flex items-center justify-between px-5 py-2 bg-cockpit-900 border-y border-cockpit-700 shrink-0">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <Activity size={16} className="text-fuel-filter" />
-            <span className="text-xs font-semibold text-cockpit-100">Nhiên liệu — Gốc và sau lọc</span>
+            <Activity size={16} className="text-[#ab63fa]" />
+            <span className="text-xs font-semibold text-cockpit-100">Nhiên liệu — Gốc và Lọc AI</span>
           </div>
-          <div className="flex items-center gap-4 text-[11px] ml-2 border-l border-cockpit-700 pl-4">
-            <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-fuel-raw" /><span className="text-cockpit-300">Xăng gốc</span></span>
-            <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-blue-500" /><span className="text-[10px] uppercase tracking-widest text-blue-400 font-semibold">AI-Enhanced Kalman (Causal v3)</span></span>
-            <label className="flex items-center gap-1.5 cursor-pointer hover:bg-cockpit-700 px-2 py-1 rounded transition-colors">
-              <input 
-                type="checkbox" 
-                checked={showAdaptive} 
-                onChange={(e) => setShowAdaptive(e.target.checked)}
-                className="accent-fuel-filter rounded cursor-pointer"
-              />
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-0.5 bg-fuel-filter" />
-                <span className="text-[10px] uppercase tracking-widest text-cockpit-400">Adaptive Kalman</span>
-              </span>
-            </label>
+          <div className="flex items-center gap-5 text-[11px] ml-2 border-l border-cockpit-700 pl-4">
+            <span className="flex items-center gap-1.5">
+              <span className="w-3.5 h-1 bg-fuel-raw rounded-full" />
+              <span className="text-cockpit-300 font-medium">Xăng gốc (Nhiễu)</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3.5 h-1 bg-[#ab63fa] rounded-full shadow-[0_0_6px_#ab63fa]" />
+              <span className="text-[11px] uppercase tracking-wider text-[#ab63fa] font-bold">Lọc AI (Màu tím)</span>
+            </span>
           </div>
         </div>
         <div className="flex items-center gap-1 text-[11px]">
@@ -144,12 +131,12 @@ export default function RollingChart({ trip, points, cursor, windowSec, playing 
           ))}
         </div>
       </div>
-      <ChartPanel mode="fuel" points={points} cursor={cursor} windowSec={windowSec} playing={playing} zoom={zoom} trip={trip} showAdaptive={showAdaptive} />
+      <ChartPanel mode="fuel" points={points} cursor={cursor} windowSec={windowSec} playing={playing} zoom={zoom} trip={trip} />
     </div>
   );
 }
 
-function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, showAdaptive = false }: {
+function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip }: {
   mode: ChartMode;
   points: TripPoint[];
   cursor: number;
@@ -157,7 +144,6 @@ function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, 
   playing: boolean;
   zoom?: number;
   trip: Trip;
-  showAdaptive?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -177,12 +163,12 @@ function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, 
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      draw(ctx, width, height, points, cursor, windowSec, mode, zoom, trip, showAdaptive);
+      draw(ctx, width, height, points, cursor, windowSec, mode, zoom, trip);
     };
     render();
     window.addEventListener("resize", render);
     return () => window.removeEventListener("resize", render);
-  }, [points, cursor, windowSec, mode, zoom, playing, showAdaptive]);
+  }, [points, cursor, windowSec, mode, zoom, playing]);
 
   return (
     <div ref={containerRef} className={`relative w-full ${mode === "speed" ? "h-[160px]" : "h-[240px]"} shrink-0`}>
@@ -194,7 +180,7 @@ function ChartPanel({ mode, points, cursor, windowSec, playing, zoom = 1, trip, 
   );
 }
 
-function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripPoint[], cursor: number, windowSec: number, mode: ChartMode, zoom: number, trip: Trip, showAdaptive: boolean = false) {
+function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripPoint[], cursor: number, windowSec: number, mode: ChartMode, zoom: number, trip: Trip) {
   const padL = 52;
   const padR = 14;
   const padT = 14;
@@ -220,8 +206,8 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
 
   const allVisibleValues = visible.flatMap((point) => {
     const vals = [point.rawFuel];
-    if (showAdaptive) vals.push(point.adaptiveKalman);
-    if (point.mlKalman !== undefined) vals.push(point.mlKalman);
+    const aiVal = point.aiSmoothTracking !== undefined ? point.aiSmoothTracking : (point.mlKalman !== undefined ? point.mlKalman : point.adaptiveKalman);
+    if (aiVal !== undefined) vals.push(aiVal);
     return vals;
   });
   const minVisible = allVisibleValues.length ? Math.min(...allVisibleValues) : 0;
@@ -281,14 +267,20 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
       ctx.fillStyle = getCssVar("--chart-spike");
       ctx.fillRect(xOf(point.t) - 1.5, padT, 3, plotH);
     }
+    // 1. Xăng thô (Gốc)
     drawLine(ctx, visible, (point) => yOf(point.rawFuel), xOf, withAlpha(rawHex, 0.35), 1, 0);
     drawLine(ctx, visible, (point) => yOf(point.rawFuel), xOf, rawHex, 1.6, 6);
     
-    drawLine(ctx, visible, (point) => yOf(point.mlKalman !== undefined ? point.mlKalman : point.adaptiveKalman), xOf, "#3b82f6", 2.4, 6); // blue-500
-    
-    if (showAdaptive) {
-      drawLine(ctx, visible, (point) => yOf(point.adaptiveKalman), xOf, filterHex, 2.4, 8);
-    }
+    // 2. Lọc AI (Màu tím: Bám sát & Mượt mà)
+    drawLine(
+      ctx,
+      visible,
+      (point) => yOf(point.aiSmoothTracking !== undefined ? point.aiSmoothTracking : (point.mlKalman !== undefined ? point.mlKalman : point.adaptiveKalman)),
+      xOf,
+      "#ab63fa",
+      2.8,
+      8
+    );
   } else {
     drawLine(ctx, visible, (point) => yOf(point.speed), xOf, speedHex, 2.4, 6);
   }
@@ -302,9 +294,14 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, points: TripP
   ctx.lineTo(lastX, padT + plotH);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = accent;
+  
+  // Chấm tròn điểm cuối nổi bật theo thuật toán màu tím
+  ctx.fillStyle = mode === "speed" ? accent : "#ab63fa";
   ctx.beginPath();
-  ctx.arc(lastX, yOf(mode === "speed" ? last.speed : last.adaptiveKalman), 4, 0, Math.PI * 2);
+  const lastFuelVal = last.aiSmoothTracking !== undefined
+    ? last.aiSmoothTracking
+    : (last.mlKalman !== undefined ? last.mlKalman : last.adaptiveKalman);
+  ctx.arc(lastX, yOf(mode === "speed" ? last.speed : lastFuelVal), 4.5, 0, Math.PI * 2);
   ctx.fill();
 }
 

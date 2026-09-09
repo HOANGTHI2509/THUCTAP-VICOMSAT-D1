@@ -29,11 +29,19 @@ class FuelCleanerEngine:
     Quản lý bộ nhớ trạng thái cách ly cho từng xe, an toàn luồng (thread-safe).
     """
 
-    def __init__(self, model_dir: Optional[str] = None):
+    def __init__(
+        self,
+        model_dir: Optional[str] = None,
+        state_manager: Optional[StreamingStateManager] = None,
+    ):
         """
         Khởi tạo Engine lọc dầu.
         Tự động tìm và nạp mô hình Random Forest tại models/fuel_state_classifier nếu không truyền đường dẫn.
         """
+        if state_manager is not None:
+            self.state_manager = state_manager
+            return
+
         if model_dir is None:
             # Tìm đường dẫn model tương đối so với thư mục gốc dự án
             base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -89,9 +97,6 @@ class FuelCleanerEngine:
             dt = timestamp
 
         # Lấy giá trị sạch trước đó của xe để phát hiện bước nhảy
-        ctx = self.state_manager.get_or_create_context(vehicle_id, capacity_est=capacity_est)
-        prev_clean = ctx.last_clean_fuel if ctx.last_clean_fuel is not None else float(raw_fuel)
-
         # Chạy pipeline AI + Adaptive Kalman qua StreamingStateManager
         res = self.state_manager.process_point(
             vehicle_id=vehicle_id,
@@ -105,6 +110,7 @@ class FuelCleanerEngine:
         )
 
         clean_val = float(res.get("clean_fuel_liters", raw_fuel))
+        prev_clean = float(res.get("previous_clean_fuel_liters", raw_fuel))
         ai_state = str(res.get("ai_signal_state", "STABLE_JITTER"))
         conf = float(res.get("confidence", 1.0))
         ai_state_desc = AI_STATE_DESCRIPTIONS.get(ai_state, "Ổn định")
@@ -233,11 +239,7 @@ class FuelCleanerEngine:
 
     def reset_vehicle(self, vehicle_id: str) -> bool:
         """Xóa trạng thái trong RAM của một xe cụ thể."""
-        with self.state_manager._lock:
-            if vehicle_id in self.state_manager._contexts:
-                del self.state_manager._contexts[vehicle_id]
-                return True
-        return False
+        return self.state_manager.reset_vehicle_state(vehicle_id)
 
     def get_active_vehicles(self) -> List[str]:
         """Lấy danh sách các xe đang có trạng thái lưu trong RAM."""

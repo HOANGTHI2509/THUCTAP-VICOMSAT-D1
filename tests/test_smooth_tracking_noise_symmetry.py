@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
 
-from src.core.filters.ai_smooth_tracking_filter import AISmoothTrackingFilter
+from src.core.filters.ai_smooth_tracking_filter import (
+    AISmoothTrackingFilter,
+    SmoothTrackingConfig,
+)
 
 
 def _run(values, states, speeds, capacity=800.0):
@@ -30,12 +33,20 @@ def test_parked_oscillation_valley_does_not_pull_filter_to_bottom():
     assert abs(clean[-1] - 360.0) < 1.0
 
 
-def test_small_moving_hill_is_only_followed_slightly():
-    values = [360.0, 365.0, 365.0, 365.0, 360.0]
+def test_small_moving_hill_is_strongly_attenuated():
+    values = [360.0, 361.0, 362.0, 361.5, 360.0]
     results = _run(values, ["OSCILLATION_NOISE"] * len(values), [35.0] * len(values))
     clean = [item["clean_fuel"] for item in results]
 
-    assert max(clean) < 361.0
+    assert max(clean) - min(clean) < 0.1
+
+
+def test_small_parked_hill_is_smoothed_without_a_large_bump():
+    values = [360.0, 361.5, 361.5, 361.5, 361.5, 360.0]
+    results = _run(values, ["STABLE_JITTER"] * len(values), [0.0] * len(values))
+    clean = [item["clean_fuel"] for item in results]
+
+    assert max(clean) - min(clean) < 0.5
 
 
 def test_supported_moving_downward_trend_still_tracks_consumption():
@@ -54,6 +65,27 @@ def test_stable_lower_plateau_is_accepted_below_large_shift_threshold():
 
     assert clean[-1] < 480.0
     assert "STABLE_LEVEL_TRACKING" in [item["quality_flag"] for item in results]
+
+
+def test_stationary_u_shape_regression_matches_the_restored_filter():
+    values = [360.0, 345.0, 345.0, 345.0, 345.0] + [360.0] * 7
+    results = _run(values, ["STABLE_JITTER"] * len(values), [0.0] * len(values), capacity=800.0)
+    clean = [item["clean_fuel"] for item in results]
+
+    assert clean == [
+        360.0, 359.79, 359.68, 359.57, 352.37, 352.56,
+        352.75, 352.93, 353.1, 353.26, 353.57, 353.87,
+    ]
+
+
+def test_level_shift_regression_matches_the_restored_filter():
+    values = [200.0, 180.0, 180.0, 180.0, 196.0, 194.0, 192.0]
+    states = ["STABLE_JITTER"] * 4 + ["GRADUAL_CHANGE"] * 3
+    speeds = [30.0, 0.0, 0.0, 0.0, 25.0, 30.0, 35.0]
+    results = _run(values, states, speeds, capacity=300.0)
+    clean = [item["clean_fuel"] for item in results]
+
+    assert clean == [200.0, 200.0, 200.0, 180.0, 180.0, 180.0, 192.0]
 
 
 def test_noisy_but_directional_consumption_tracks_a_continuous_slope():
@@ -78,3 +110,42 @@ def test_strong_bidirectional_noise_is_filtered_more_than_mild_jitter():
     assert strong_span < 1.0
     assert mild_span < 1.0
     assert strong_span / (max(strong) - min(strong)) < mild_span / (max(mild) - min(mild))
+
+
+def test_filter_configuration_can_be_injected():
+    default_results = _run(
+        [100.0, 99.0],
+        ["STABLE_JITTER", "STABLE_JITTER"],
+        [0.0, 0.0],
+        capacity=200.0,
+    )
+    custom_config = SmoothTrackingConfig(parked_r=1.0, parked_q=1.0, mild_noise_r=1.0)
+    custom_engine = AISmoothTrackingFilter(model_dir="", config=custom_config)
+    start = datetime(2026, 1, 1)
+    custom_results = [
+        custom_engine.process_point("TEST", start, 100.0, 0.0, 200.0, "STABLE_JITTER"),
+        custom_engine.process_point(
+            "TEST",
+            start + timedelta(minutes=2),
+            99.0,
+            0.0,
+            200.0,
+            "STABLE_JITTER",
+        ),
+    ]
+
+    assert custom_engine.config is custom_config
+    assert custom_results[-1]["clean_fuel"] < default_results[-1]["clean_fuel"]
+
+
+def test_vehicle_contexts_are_isolated():
+    engine = AISmoothTrackingFilter(model_dir="")
+    timestamp = datetime(2026, 1, 1)
+
+    first_vehicle = engine.process_point("CAR_A", timestamp, 100.0, 20.0, 200.0)
+    second_vehicle = engine.process_point("CAR_B", timestamp, 300.0, 20.0, 400.0)
+
+    assert first_vehicle["clean_fuel"] == 100.0
+    assert second_vehicle["clean_fuel"] == 300.0
+    assert engine.contexts["CAR_A"].last_clean_fuel == 100.0
+    assert engine.contexts["CAR_B"].last_clean_fuel == 300.0

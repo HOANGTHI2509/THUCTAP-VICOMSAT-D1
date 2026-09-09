@@ -131,6 +131,9 @@ export function samplePoint(trip: Trip, t: number, prev: TripPoint | null): Trip
     rawFuel,
     adaptiveKalman: Math.max(0, filtered),
     traditionalKalman: Math.max(0, filtered),
+    mlKalman: Math.max(0, filtered),
+    aiSmoothTracking: Math.max(0, filtered),
+    smoothTracking: Math.max(0, filtered),
     noise: rawFuel - filtered,
     isSpike: Math.abs(noise) > SPIKE_THRESHOLD || eventFlag,
   };

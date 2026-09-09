@@ -18,6 +18,8 @@ export interface TripPoint {
   adaptiveKalman: number;
   traditionalKalman: number;
   mlKalman?: number;
+  aiSmoothTracking?: number;
+  smoothTracking?: number;
   cnn1DFuel?: number;
   noise: number;
   isSpike: boolean;

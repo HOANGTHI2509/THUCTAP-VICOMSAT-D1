@@ -1,0 +1,62 @@
+[
+  {
+    "id": "21H-02058_stationary_noise_pulse",
+    "source": "TienXuLy/21H-02058_processed.csv",
+    "source_rows": [899, 910],
+    "review_status": "initial_baseline_pending_domain_review",
+    "description": "Xung thut 9.2 L khi xe dung, sau do raw quay ve plateau.",
+    "capacity_est_liters": 200.0,
+    "timestamps": ["2026-08-11 06:04:00", "2026-08-11 06:06:00", "2026-08-11 06:08:00", "2026-08-11 06:10:00", "2026-08-11 06:12:00", "2026-08-11 06:14:00", "2026-08-11 06:16:00", "2026-08-11 06:19:00", "2026-08-11 06:21:00", "2026-08-11 06:23:00", "2026-08-11 06:25:00", "2026-08-11 06:27:00"],
+    "raw_liters": [528.7, 527.0, 526.5, 528.3, 519.5, 527.6, 528.0, 531.5, 531.5, 531.5, 531.5, 531.5],
+    "speed_kmh": [0.0, 13.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "expected_clean_liters": [528.7, 528.66, 528.61, 528.59, 528.51, 528.49, 528.47, 528.48, 528.49, 528.55, 528.62, 528.68],
+    "expected_production_clean_liters": [528.7, 528.66, 528.55, 528.54, 528.46, 528.46, 528.44, 528.51, 528.57, 528.64, 528.7, 528.83],
+    "expected_production_states": ["INIT", "GRADUAL_CHANGE", "STABLE_JITTER", "STABLE_JITTER", "OSCILLATION_NOISE", "OSCILLATION_NOISE", "STABLE_JITTER", "STABLE_JITTER", "STABLE_JITTER", "STABLE_JITTER", "STABLE_JITTER", "STABLE_JITTER"],
+    "checks": {"max_clean_span": 0.3, "min_clean_liters": 528.4}
+  },
+  {
+    "id": "21H-03221_short_valley_recovery",
+    "source": "TienXuLy/21H-03221_processed.csv",
+    "source_rows": [200, 211],
+    "review_status": "initial_baseline_pending_domain_review",
+    "description": "Valley-U ngắn 13.2 L trong pha chuyen dong, raw sau do on dinh o muc cao.",
+    "capacity_est_liters": 200.0,
+    "timestamps": ["2026-08-10 06:47:00", "2026-08-10 06:48:00", "2026-08-10 06:50:00", "2026-08-10 06:52:00", "2026-08-10 06:54:00", "2026-08-10 06:56:00", "2026-08-10 06:59:00", "2026-08-10 07:01:00", "2026-08-10 07:03:00", "2026-08-10 07:05:00", "2026-08-10 07:07:00", "2026-08-10 07:09:00"],
+    "raw_liters": [435.0, 435.0, 427.8, 423.9, 433.5, 425.2, 437.1, 437.1, 437.1, 437.1, 437.1, 437.1],
+    "speed_kmh": [0.0, 0.0, 10.0, 45.0, 42.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "expected_clean_liters": [435.0, 435.0, 434.83, 432.6, 432.61, 432.34, 432.24, 432.25, 432.27, 432.28, 432.37, 432.45],
+    "expected_production_clean_liters": [435.0, 435.0, 434.83, 434.79, 434.79, 432.29, 432.18, 432.2, 432.21, 432.23, 432.32, 432.41],
+    "expected_production_states": ["INIT", "STABLE_JITTER", "GRADUAL_CHANGE", "OSCILLATION_NOISE", "OSCILLATION_NOISE", "OSCILLATION_NOISE", "OSCILLATION_NOISE", "OSCILLATION_NOISE", "OSCILLATION_NOISE", "OSCILLATION_NOISE", "OSCILLATION_NOISE", "OSCILLATION_NOISE"],
+    "checks": {"min_clean_liters": 432.0, "max_clean_span": 3.0, "min_valley_attenuation_liters": 8.0}
+  },
+  {
+    "id": "92H-02687_steady_moving_consumption",
+    "source": "TienXuLy/92H-02687_processed.csv",
+    "source_rows": [394, 403],
+    "review_status": "initial_baseline_pending_domain_review",
+    "description": "Giam nhien lieu nhe va deu khi xe chay 36-57 km/h, nhieu cuc bo thap.",
+    "capacity_est_liters": 200.0,
+    "timestamps": ["2026-08-12 13:18:00", "2026-08-12 13:20:00", "2026-08-12 13:22:00", "2026-08-12 13:24:00", "2026-08-12 13:26:00", "2026-08-12 13:28:00", "2026-08-12 13:30:00", "2026-08-12 13:32:00", "2026-08-12 13:34:00", "2026-08-12 13:36:00"],
+    "raw_liters": [567.5, 566.8, 566.7, 566.8, 566.5, 565.2, 565.0, 564.7, 564.4, 563.0],
+    "speed_kmh": [46.0, 40.0, 36.0, 49.0, 47.0, 51.0, 57.0, 55.0, 41.0, 56.0],
+    "expected_clean_liters": [567.5, 567.48, 567.46, 567.45, 567.42, 567.36, 566.84, 566.29, 565.36, 565.25],
+    "expected_production_clean_liters": [567.5, 567.46, 567.41, 567.37, 567.32, 567.26, 567.11, 566.58, 565.46, 565.35],
+    "expected_production_states": ["INIT", "STABLE_JITTER", "STABLE_JITTER", "STABLE_JITTER", "STABLE_JITTER", "GRADUAL_CHANGE", "STABLE_JITTER", "STABLE_JITTER", "STABLE_JITTER", "GRADUAL_CHANGE"],
+    "checks": {"min_total_clean_drop": 2.0, "max_upward_step": 0.05, "max_final_lag_liters": 2.5}
+  },
+  {
+    "id": "29E-44284_noisy_moving_consumption",
+    "source": "TienXuLy/29E-44284_processed.csv",
+    "source_rows": [402, 410],
+    "review_status": "initial_baseline_pending_domain_review",
+    "description": "Giam manh khi xe chay 22-60 km/h; can bam xu huong giam ma khong nhay bac qua lon.",
+    "capacity_est_liters": 200.0,
+    "timestamps": ["2026-08-11 09:30:00", "2026-08-11 09:35:00", "2026-08-11 09:40:00", "2026-08-11 09:45:00", "2026-08-11 09:50:00", "2026-08-11 09:55:00", "2026-08-11 10:00:00", "2026-08-11 10:05:00", "2026-08-11 10:10:00"],
+    "raw_liters": [512.7, 508.1, 503.5, 502.4, 499.3, 497.4, 495.6, 492.9, 491.7],
+    "speed_kmh": [22.0, 41.0, 39.0, 53.0, 60.0, 58.0, 58.0, 55.0, 52.0],
+    "expected_clean_liters": [512.7, 512.58, 509.78, 506.98, 504.18, 501.39, 498.59, 495.79, 492.99],
+    "expected_production_clean_liters": [512.7, 512.58, 509.78, 506.98, 504.18, 501.39, 498.59, 495.79, 492.99],
+    "expected_production_states": ["INIT", "GRADUAL_CHANGE", "GRADUAL_CHANGE", "GRADUAL_CHANGE", "OSCILLATION_NOISE", "OSCILLATION_NOISE", "OSCILLATION_NOISE", "OSCILLATION_NOISE", "OSCILLATION_NOISE"],
+    "checks": {"min_total_clean_drop": 18.0, "max_upward_step": 0.05, "max_step_size": 3.0}
+  }
+]

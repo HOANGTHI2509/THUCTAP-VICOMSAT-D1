@@ -34,13 +34,30 @@ export function useRealtimeData(targetVehicleId?: string) {
 
       if (filteredData.length === 0) return;
 
-      const baseMs = new Date(filteredData[0].time).getTime();
-      setStartTimeStr(filteredData[0].time);
+      // Lấy thời gian trung vị (median) để giữ lại toàn bộ cụm dữ liệu xe đang chạy
+      // và loại bỏ chính xác các điểm rác bị lệch thời gian > 24 giờ
+      let cleanData = filteredData;
+      if (filteredData.length > 2) {
+        const times = filteredData.map((d: any) => new Date(d.time).getTime()).sort((a, b) => a - b);
+        const medianTime = times[Math.floor(times.length / 2)];
+        cleanData = filteredData.filter((d: any) => {
+          const t = new Date(d.time).getTime();
+          return Math.abs(t - medianTime) <= 24 * 3600 * 1000;
+        });
+      }
+
+      if (cleanData.length === 0) cleanData = filteredData;
+
+      const baseMs = new Date(cleanData[0].time).getTime();
+      setStartTimeStr(cleanData[0].time);
       
       // Map backend format to TripPoint format
-      const mappedData: TripPoint[] = filteredData.map((d: any) => {
+      const mappedData: TripPoint[] = cleanData.map((d: any) => {
         const ptTime = new Date(d.time).getTime();
         const cleanFuel = d.ai_enhanced !== undefined ? d.ai_enhanced : (d.adaptive !== undefined ? d.adaptive : d.raw);
+        const smoothFuel = d.ai_smooth_tracking !== undefined
+          ? d.ai_smooth_tracking
+          : (d.smooth_tracking !== undefined ? d.smooth_tracking : cleanFuel);
         const rawFuel = d.raw !== undefined ? d.raw : cleanFuel;
         const noise = rawFuel - cleanFuel;
         const isSpike = Math.abs(noise) > 4.0;
@@ -52,6 +69,8 @@ export function useRealtimeData(targetVehicleId?: string) {
           traditionalKalman: d.kalman !== undefined ? d.kalman : cleanFuel,
           adaptiveKalman: d.adaptive !== undefined ? d.adaptive : cleanFuel,
           mlKalman: cleanFuel,
+          aiSmoothTracking: smoothFuel,
+          smoothTracking: smoothFuel,
           noise: noise,
           isSpike: isSpike,
           vehicleId: d.vehicle_id || d.VehicleID || targetVehicleId || "21H-03221",
@@ -68,7 +87,9 @@ export function useRealtimeData(targetVehicleId?: string) {
         setCurrent(mappedData[mappedData.length - 1]);
         setEvents(mappedData.filter(p => p.isSpike).slice(-10));
         setCursor(lastT);
-        setWindowSec(Math.max(600, lastT));
+        // Cửa sổ cuộn sóng tối đa 20 phút (1200 giây) để biểu đồ cuộn liên tục
+        const span = lastT - mappedData[0].t;
+        setWindowSec(Math.min(1200, Math.max(600, span)));
       }
     } catch (err) {
       console.error("Lỗi lấy dữ liệu Realtime:", err);

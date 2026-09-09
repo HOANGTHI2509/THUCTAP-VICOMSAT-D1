@@ -96,7 +96,7 @@ export default function LiveStreamControl({ current, pointsCount, onSwitch, sele
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-base font-mono font-bold text-white tracking-wide">{vehicleId}</span>
+            <span className="text-base font-mono font-bold text-cockpit-100 tracking-wide">{vehicleId}</span>
             <div className="text-right">
               <span className="text-[11px] font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
                 Queue: {queueSize}
@@ -116,15 +116,15 @@ export default function LiveStreamControl({ current, pointsCount, onSwitch, sele
         <div className="bg-cockpit-900 border border-cockpit-750 rounded-xl p-3 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] uppercase tracking-widest text-cockpit-400 font-semibold flex items-center gap-1.5">
-              <Cpu size={12} className="text-purple-400" />
-              Causal AI + Adaptive Kalman
+              <Cpu size={12} className="text-[#ab63fa]" />
+              AI Smooth-Tracking (Màu tím)
             </span>
-            <span className="text-[10px] text-purple-300 font-mono font-semibold">FIFO Order</span>
+            <span className="text-[10px] text-[#ab63fa] font-mono font-semibold">Realtime Flow</span>
           </div>
 
           <div className="p-2.5 rounded-lg bg-cockpit-950 border border-cockpit-800 space-y-1.5">
             <div className="text-[10px] text-cockpit-400">Trạng thái tín hiệu tức thời:</div>
-            <div className="text-xs font-mono font-bold text-purple-400 tracking-wide">
+            <div className="text-xs font-mono font-bold text-[#ab63fa] tracking-wide">
               {aiState}
             </div>
             <div className="flex items-center justify-between text-[10px] text-cockpit-400 pt-1">
@@ -156,13 +156,13 @@ export default function LiveStreamControl({ current, pointsCount, onSwitch, sele
                   className={`w-full text-left flex items-center justify-between p-2.5 rounded-xl border text-xs transition-all cursor-pointer shadow-sm ${
                     isSelected
                       ? "bg-blue-500/20 border-blue-500 text-blue-300 shadow-md ring-1 ring-blue-500/40"
-                      : "bg-cockpit-900 border-cockpit-800 text-cockpit-400 hover:border-cockpit-600 hover:bg-cockpit-800/80 hover:text-white"
+                      : "bg-cockpit-900 border-cockpit-800 text-cockpit-400 hover:border-cockpit-600 hover:bg-cockpit-800/80 hover:text-cockpit-100"
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
                     <span className="text-base">🚗</span>
                     <div>
-                      <div className={`font-medium ${isSelected ? "text-white font-bold" : ""}`}>{car.name}</div>
+                      <div className={`font-medium ${isSelected ? "text-cockpit-100 dark:text-white font-bold" : ""}`}>{car.name}</div>
                       <div className="text-[9px] text-cockpit-500 flex items-center gap-1.5">
                         <span>{car.tag}</span>
                         {carProcessed !== undefined && (

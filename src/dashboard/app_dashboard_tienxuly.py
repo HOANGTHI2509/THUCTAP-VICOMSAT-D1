@@ -424,40 +424,24 @@ st.markdown("### 📈 Biểu đồ Đấu trường Thuật toán (Đã Fix Inde
 fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
                     vertical_spacing=0.05,
                     specs=[[{"secondary_y": True}], [{}], [{}]],
-                    subplot_titles=("1. Đối chứng: Mức Nhiên Liệu Gốc vs Kalman Truyền Thống & AI-Enhanced Realtime", "2. Tốc độ di chuyển", "3. Độ nhiễu cục bộ (Rolling Std)"),
+                    subplot_titles=("1. Đối chứng: Mức Nhiên Liệu Gốc vs Lọc AI (Màu tím)", "2. Tốc độ di chuyển", "3. Độ nhiễu cục bộ (Rolling Std)"),
                     row_heights=[0.6, 0.2, 0.2])
 
-# 1. Fuel Plot & Custom Algorithm Traces
+# 1. Fuel Plot & Custom Algorithm Traces (Chỉ giữ Xăng gốc và Lọc AI màu tím)
 show_legend = True
 for seg_id, group in df_seg.groupby('SegmentID', sort=False):
     # 1. Raw Fuel (Dữ liệu gốc)
     fig.add_trace(go.Scatter(
         x=group['FuelTime'], y=group['FuelLevel'], 
-        mode='lines+markers', name='Raw FuelLevel (Thô)', legendgroup='raw', showlegend=show_legend,
-        line=dict(color='red', width=1), marker=dict(size=4), connectgaps=True
-    ), row=1, col=1, secondary_y=False)
-                             
-    # 2. Kalman Filter Truyen Thong
-    fig.add_trace(go.Scatter(
-        x=group['FuelTime'], y=group['Custom_Kalman'], 
-        mode='lines', name=f'Kalman Filter Truyền Thống (R={kalman_r})', legendgroup='kalman', showlegend=show_legend,
-        line=dict(color='#00CC96', width=2), connectgaps=True
+        mode='lines', name='Xăng gốc', legendgroup='raw', showlegend=show_legend,
+        line=dict(color='#EF553B', width=1.5), marker=dict(size=3), connectgaps=True
     ), row=1, col=1, secondary_y=False)
 
-    # 3. AI-Enhanced Kalman Realtime / Causal (Thuật toán chính)
-    if 'AI_Enhanced_Kalman_Realtime' in group.columns:
-        fig.add_trace(go.Scatter(
-            x=group['FuelTime'], y=group['AI_Enhanced_Kalman_Realtime'],
-            mode='lines', name='AI-Enhanced Kalman (Realtime / Causal)',
-            legendgroup='ai_enhanced_kalman_realtime', showlegend=show_legend,
-            line=dict(color='#FF7F0E', width=2.5), connectgaps=True
-        ), row=1, col=1, secondary_y=False)
-
-    # 4. AI Smooth-Tracking Filter (Mới: Bám sát & Làm mượt)
+    # 2. AI Smooth-Tracking Filter (Đường lọc AI màu tím: Bám sát & Mượt mà)
     if 'AI_Smooth_Tracking' in group.columns:
         fig.add_trace(go.Scatter(
             x=group['FuelTime'], y=group['AI_Smooth_Tracking'],
-            mode='lines', name='AI Smooth-Tracking (Mới: Bám sát & Mượt)',
+            mode='lines', name='Lọc AI (Màu tím)',
             legendgroup='ai_smooth_tracking', showlegend=show_legend,
             line=dict(color='#AB63FA', width=2.5), connectgaps=True
         ), row=1, col=1, secondary_y=False)

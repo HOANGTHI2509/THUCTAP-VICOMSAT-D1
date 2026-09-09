@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Gauge as GaugeIcon, Fuel, ShieldCheck, AlertTriangle, Radio } from "lucide-react";
 import type { TripPoint } from "@/simulation/types";
 
@@ -80,11 +80,9 @@ function FuelReadout({ value, label, color, flashing }: {
 }
 
 export default function Dashboard({ current, playing }: Props) {
-  const [showAI, setShowAI] = useState(true);
   const speed = current?.speed ?? 0;
   const raw = current?.rawFuel ?? 0;
-  const filtered = current?.adaptiveKalman ?? 0;
-  const aiFiltered = current?.mlKalman ?? 0;
+  const smoothFiltered = current?.aiSmoothTracking ?? (current?.mlKalman ?? (current?.adaptiveKalman ?? 0));
   const isSpike = current?.isSpike ?? false;
   const alert = isSpike && playing;
 
@@ -123,8 +121,7 @@ export default function Dashboard({ current, playing }: Props) {
         <MiniGauge value={speed} min={0} max={90} unit="km/h" label="Vận tốc"
           color="var(--color-speed)" icon={<GaugeIcon size={12} />} />
         <FuelReadout value={raw} label="Xăng gốc (nhiễu)" color="var(--color-fuel-raw)" flashing={alert} />
-        <FuelReadout value={filtered} label="Xăng sau lọc (Adaptive)" color="var(--color-fuel-filter)" flashing={false} />
-        <FuelReadout value={aiFiltered} label="Xăng sau lọc (AI-Kalman)" color="#3b82f6" flashing={false} />
+        <FuelReadout value={smoothFiltered} label="Lọc AI (Màu tím)" color="#ab63fa" flashing={false} />
         <div className="flex items-center gap-3">
           <div className={`w-[72px] h-[72px] rounded-2xl flex flex-col items-center justify-center gap-1 transition-all shrink-0
               ${alert
