@@ -1,12 +1,9 @@
 from __future__ import annotations
 
+import math
 import numpy as np
 import pandas as pd
-from dataclasses import asdict, dataclass
-
-
-
-# Chuyển một cột DataFrame sang mảng số float; nếu cột thiếu hoặc giá trị lỗi thì dùng giá trị mặc định.
+from dataclasses import asdict, dataclass, field
 def _numeric_array(df: pd.DataFrame, column: str, default: float = 0.0) -> np.ndarray:
     if column in df.columns:
         return pd.to_numeric(df[column], errors="coerce").fillna(default).to_numpy(dtype=float)
@@ -41,6 +38,23 @@ class RealtimeAdaptiveKalmanState:
     dropout_count: int = 0
     dropout_recovery_count: int = 0
     dropout_seen_near_zero: bool = False
+    # Ứng viên dịch mức hai chiều. Đây chỉ là trạng thái làm sạch tín hiệu,
+    # không mang nghĩa "đổ" hay "rút" nhiên liệu.
+    level_candidate_direction: str | None = None  # "UP" | "DOWN"
+    level_candidate_anchor: float | None = None
+    level_candidate_center: float | None = None
+    level_candidate_min_shift: float | None = None
+    level_candidate_required_points: int = 3
+    level_candidate_samples: list[float] = field(default_factory=list)
+    level_candidate_times: list[str] = field(default_factory=list)
+    # Nhánh độc lập cho "đồi" tăng nhỏ; không dùng chung bộ đếm với
+    # UPWARD_LEVEL_SHIFT lớn để tránh làm chậm một lần tăng thật.
+    micro_up_anchor: float | None = None
+    micro_up_center: float | None = None
+    micro_up_samples: list[float] = field(default_factory=list)
+    micro_up_times: list[str] = field(default_factory=list)
+    micro_up_release_steps: int = 0
+    dt_expected_minutes: float = 2.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -73,6 +87,59 @@ def _reset_state(state: RealtimeAdaptiveKalmanState) -> None:
     state.dropout_count = 0
     state.dropout_recovery_count = 0
     state.dropout_seen_near_zero = False
+    state.level_candidate_direction = None
+    state.level_candidate_anchor = None
+    state.level_candidate_center = None
+    state.level_candidate_min_shift = None
+    state.level_candidate_required_points = 3
+    state.level_candidate_samples.clear()
+    state.level_candidate_times.clear()
+    state.micro_up_anchor = None
+    state.micro_up_center = None
+    state.micro_up_samples.clear()
+    state.micro_up_times.clear()
+    state.micro_up_release_steps = 0
+    state.dt_expected_minutes = 2.0
+    # Không để segment cũ làm reset lặp lại ở điểm kế tiếp của segment mới.
+    state.segment_id = None
+    state.fuel_time = None
+
+
+def _clear_level_candidate(state: RealtimeAdaptiveKalmanState) -> None:
+    """Xóa ứng viên chưa chốt, giữ nguyên mức Kalman đã phát ra."""
+    state.level_candidate_direction = None
+    state.level_candidate_anchor = None
+    state.level_candidate_center = None
+    state.level_candidate_min_shift = None
+    state.level_candidate_required_points = 3
+    state.level_candidate_samples.clear()
+    state.level_candidate_times.clear()
+
+
+def _clear_micro_up_candidate(state: RealtimeAdaptiveKalmanState) -> None:
+    state.micro_up_anchor = None
+    state.micro_up_center = None
+    state.micro_up_samples.clear()
+    state.micro_up_times.clear()
+
+
+def _candidate_duration_minutes(state: RealtimeAdaptiveKalmanState) -> float:
+    if len(state.level_candidate_times) < 2:
+        return 0.0
+    first = _as_timestamp(state.level_candidate_times[0])
+    last = _as_timestamp(state.level_candidate_times[-1])
+    if first is None or last is None:
+        return 0.0
+    return max(0.0, (last - first).total_seconds() / 60.0)
+
+
+def _directionality(samples: list[float]) -> float:
+    """1 = đi một hướng rõ ràng; gần 0 = lên/xuống lẫn lộn (sloshing)."""
+    if len(samples) < 2:
+        return 0.0
+    values = np.asarray(samples, dtype=float)
+    path = float(np.abs(np.diff(values)).sum())
+    return abs(float(values[-1] - values[0])) / path if path > 1e-9 else 1.0
 
 
 def filter_ai_enhanced_adaptive_realtime(
@@ -143,13 +210,16 @@ def filter_ai_enhanced_adaptive_realtime(
     drain_min_confidence = float(config.get("drain_min_confidence", 0.55))
     drain_max_gap_minutes = float(config.get("drain_max_gap_minutes", 30.0))
     dropout_recovery_confirm_points = int(config.get("dropout_recovery_confirm_points", 3))
+    level_shift_confirm_points = int(config.get("level_shift_confirm_points", 3))
+    level_shift_min_duration = float(config.get("level_shift_min_duration_minutes", 4.0))
+    level_shift_max_gap = float(config.get("level_shift_max_gap_minutes", 7.5))
 
     # Bộ tham số Q/R cho từng trạng thái tín hiệu (hỗ trợ cả nhãn mới và cấu hình dashboard).
     cfg_unk_r, cfg_unk_q = config.get("UNKNOWN", (25.0, 0.15))
-    cfg_ref_r, cfg_ref_q = config.get("UPWARD_SHIFT", config.get("REFUEL", (1.0, 5.0)))
+    cfg_ref_r, cfg_ref_q = config.get("UPWARD_LEVEL_SHIFT", config.get("UPWARD_SHIFT", config.get("REFUEL", (1.0, 5.0))))
     cfg_slosh_r, cfg_slosh_q = config.get("OSCILLATION_NOISE", config.get("SLOSHING", (1000.0, 0.001)))
     cfg_cons_r, cfg_cons_q = config.get("GRADUAL_CHANGE", config.get("CONSUMPTION", (25.0, 0.15)))
-    cfg_drain_r, cfg_drain_q = config.get("DOWNWARD_SHIFT", config.get("DRAIN", (5.0, 2.0)))
+    cfg_drain_r, cfg_drain_q = config.get("DOWNWARD_LEVEL_SHIFT", config.get("DOWNWARD_SHIFT", config.get("DRAIN", (5.0, 2.0))))
     cfg_stable_r, cfg_stable_q, cfg_stable_r_very = config.get("STABLE_JITTER", (35.0, 0.05, 15.0))
     cfg_spike_r, cfg_spike_q = config.get("IMPULSE_NOISE", config.get("SPIKE", (10000.0, 0.0001)))
 
@@ -168,6 +238,7 @@ def filter_ai_enhanced_adaptive_realtime(
     dropout_recovery_count = int(stream_state.dropout_recovery_count)
     dropout_seen_near_zero = bool(stream_state.dropout_seen_near_zero)
     last_seen_time = _as_timestamp(stream_state.fuel_time)
+    dt_expected_minutes = max(0.5, float(stream_state.dt_expected_minutes or 2.0))
 
     # Duyệt tuần tự từng bản tin theo đúng thứ tự thời gian; mọi quyết định chỉ dùng hiện tại + quá khứ.
     for i in range(len(group)):
@@ -180,6 +251,10 @@ def filter_ai_enhanced_adaptive_realtime(
         gap_minutes = (current_time - previous_time).total_seconds() / 60.0 if current_time is not None and previous_time is not None else 0.0
         if current_time is not None:
             last_seen_time = current_time
+        if 0.25 <= gap_minutes <= 15.0:
+            # Học chu kỳ gửi tin của đúng xe này (2 phút hoặc 5 phút), chỉ từ
+            # khoảng bình thường để gap bất thường không làm méo mốc.
+            dt_expected_minutes = 0.8 * dt_expected_minutes + 0.2 * gap_minutes
         segment_changed = stream_state.segment_id is not None and current_segment is not None and current_segment != stream_state.segment_id
         if segment_changed or gap_minutes > reset_gap_minutes:
             _reset_state(stream_state)
@@ -190,6 +265,10 @@ def filter_ai_enhanced_adaptive_realtime(
             dropout_count = 0
             dropout_recovery_count = 0
             dropout_seen_near_zero = False
+            # Ghi nhận segment mới ngay, kể cả khi điểm này là điểm khởi tạo
+            # và nhánh bên dưới thoát sớm.
+            stream_state.segment_id = current_segment
+            stream_state.fuel_time = current_time.isoformat() if current_time is not None else None
 
         is_qflag_zero = (
             any(reason in qreason for reason in {"FUEL_ZERO", "SENSOR_DROPOUT", "DROPOUT"})
@@ -205,6 +284,8 @@ def filter_ai_enhanced_adaptive_realtime(
             "SLOSHING": "OSCILLATION_NOISE",
             "SLOSHING_NOISE": "OSCILLATION_NOISE",
             "SPIKE": "IMPULSE_NOISE",
+            "UPWARD_LEVEL_SHIFT": "UPWARD_SHIFT",
+            "DOWNWARD_LEVEL_SHIFT": "DOWNWARD_SHIFT",
         }
         ai_state = legacy_map.get(raw_state, raw_state)
         capacity = max(float(capacity_values[i]), 50.0)
@@ -262,15 +343,20 @@ def filter_ai_enhanced_adaptive_realtime(
                 dropout_seen_near_zero = False
 
         # 1. Nhận diện Lỗi cảm biến mất tín hiệu / rơi về 0 / hố sụt
+        # Chỉ coi 0/gần 0 hoặc cờ chất lượng là dropout. Một mức thấp sâu
+        # nhưng hợp lệ có thể là chuyển mức thật; nó sẽ được xác nhận bằng
+        # ứng viên DOWN sau 2--3 mẫu thay vì bị giữ 35 nhịp.
         is_zero_dropout = not drain_confirmed_now and (
             pd.isna(z)
             or is_qflag_zero
             or (observed <= 5.0 and not pd.isna(last_valid_x) and last_valid_x >= 15.0)
-            or (not pd.isna(last_valid_x) and observed <= 0.40 * last_valid_x and last_valid_x >= 20.0)
-            or (not pd.isna(last_valid_x) and (last_valid_x - observed) >= max(event * 1.5, 30.0) and observed <= 0.55 * last_valid_x)
         )
 
         if is_zero_dropout:
+            # Một measurement không hợp lệ không được nối hai cụm ổn định ở
+            # hai phía của nó thành cùng một chuyển mức.
+            _clear_level_candidate(stream_state)
+            _clear_micro_up_candidate(stream_state)
             if not pd.isna(last_valid_x) and last_valid_x > 3.0:
                 dropout_anchor = last_valid_x
                 dropout_count = 1
@@ -307,6 +393,8 @@ def filter_ai_enhanced_adaptive_realtime(
         # Chỉ một UPWARD_SHIFT đã được xác nhận mới kích hoạt khoảng ân hạn vài nhịp sau đó.
         if recent_refuel_steps > 0:
             recent_refuel_steps -= 1
+        if stream_state.micro_up_release_steps > 0:
+            stream_state.micro_up_release_steps -= 1
 
         # Đếm số nhịp tăng / giảm
         if z >= x + max(jitter * 1.5, 1.2):
@@ -323,7 +411,11 @@ def filter_ai_enhanced_adaptive_realtime(
         if drain_confirmed_now:
             ai_state = "DOWNWARD_SHIFT"
             drain_count = max(drain_count, 2)
-        elif ai_state == "DOWNWARD_SHIFT":
+        elif (
+            ai_state == "DOWNWARD_SHIFT"
+            and float(confidence_values[i]) >= drain_min_confidence
+            and z <= x - max(event, 0.03 * capacity, 5.0)
+        ):
             drain_count += 1
         else:
             drain_count = 0
@@ -356,45 +448,243 @@ def filter_ai_enhanced_adaptive_realtime(
         trap_recovery = (
             is_truly_parked
             and (ai_state == "STABLE_JITTER")
-            and (x - z >= max(event * 0.5, jitter * 2.5, 3.0))
-            and (drop_count >= 3)
+            and (x - z >= max(event * 1.5, 0.05 * capacity, 10.0))
+            and (drop_count >= 4)
         )
 
-        # 3. Xác nhận dịch mức tăng (UPWARD_SHIFT; tên biến cũ còn dùng refuel).
-        # RF có thể gắn nhầm cạnh tăng của một mức tăng thật thành OSCILLATION_NOISE.
-        # Vì vậy hệ thống còn có rule causal độc lập: nếu xe đỗ và mức tăng duy trì qua nhiều nhịp,
-        # vẫn có thể xác nhận UPWARD_SHIFT mà không phụ thuộc hoàn toàn vào nhãn RF.
-        prev_z = float(raw[i - 1]) if i > 0 else (previous_raw if not pd.isna(previous_raw) else float(z))
-        prev2_z = float(raw[i - 2]) if i > 1 else (previous_raw_2 if not pd.isna(previous_raw_2) else prev_z)
-        fast_step = (z - prev_z) >= max(event * 0.6, 5.5) or (z - prev2_z) >= max(event * 0.8, 7.5)
-        min_refuel_jump = max(0.025 * capacity, event * 0.6, jitter * 4.0, 5.0)
-        labeled_refuel = ai_state == "UPWARD_SHIFT" and float(confidence_values[i]) >= refuel_confidence
+        # 3. Xác nhận dịch mức hai chiều, hoàn toàn causal.
+        # Một điểm cao/thấp đơn lẻ chỉ mở ứng viên. Muốn đổi mức phải có cụm
+        # 3 điểm gần nhau, đi theo một hướng và không bị ngắt quãng. Vì vậy
+        # các "quả đồi"/chữ U ngắn không kéo đường sạch theo, còn mức thật
+        # được bám sau 2--3 nhịp (4 phút với chu kỳ 2 phút).
+        # Chỉ chuyển mức trực tiếp với biến động đủ lớn. Dao động vài lít
+        # không phải một sự kiện mức: để Kalman xử lý đối xứng và làm mượt.
+        # Điều này ngăn các cụm nhiễu 3 điểm tạo ra đường bậc thang.
+        # Ngưỡng hai tầng:
+        # - dịch mức đứng riêng phải đủ lớn (xấp xỉ 3% bình);
+        # - bậc tăng vừa chỉ được xét khi nó nối tiếp một UP đã xác nhận.
+        # Nhờ đó cụm đồi 279->293 L không bị chốt, trong khi phần cuối của
+        # quá trình nạp 815->828 L vẫn được bám sau 3 mẫu.
+        major_shift_min = max(event * 0.8, 0.03 * capacity, jitter * 3.0, noise * 4.0, 10.0)
+        continuation_shift_min = max(jitter * 1.5, noise * 2.0, 0.005 * capacity, 3.0)
+        upward_open_threshold = continuation_shift_min if recent_refuel_steps > 0 else major_shift_min
+        # Chiều giảm ưu tiên bảo toàn mức thấp bền vững cho tầng nghiệp vụ
+        # phía sau; sau 3 mẫu vẫn bám, nhưng không tự kết luận nguyên nhân.
+        downward_open_threshold = max(event * 0.35, 0.0125 * capacity, jitter * 3.0, noise * 4.0, 8.0)
+        micro_up_min = max(jitter * 1.25, noise * 1.5, 2.0)
+        micro_up_tolerance = max(jitter * 1.5, noise * 2.0, 2.5)
+        plateau_tolerance = max(jitter * 2.0, noise * 2.5, 3.0)
+        return_to_anchor_tolerance = max(jitter * 1.25, noise * 1.5, 1.5)
+        candidate_confirmed_up = False
+        candidate_confirmed_down = False
+        sample_time = current_time.isoformat() if current_time is not None else ""
 
-        # Thoát bẫy kẹt mức dưới: nếu raw cao hơn x vượt trội liên tục >= 4 nhịp (8 phút)
-        upward_trap_escape = (
-            (z - x >= max(0.12 * capacity, 15.0))
-            and (rise_count >= 4)
-        )
-
-        # Cập nhật luật xác nhận dịch mức tăng (đổ xăng thật):
-        # Không trói cứng vào xe đỗ nếu mức tăng là cú nhảy lớn (>= 10% bình hoặc >= 12L)
-        sustained_refuel = upward_trap_escape or (
-            observed > 5.0
-            and (z - x) >= min_refuel_jump
-            and rise_count >= 3
-            and fast_step
-            and (
-                is_truly_parked
-                or (z - x >= max(0.10 * capacity, event * 1.2, 12.0))
+        # Nhánh đồi tăng nhỏ: chỉ hoạt động bên dưới ngưỡng mở UP lớn và
+        # hoàn toàn không kế thừa mẫu/bộ đếm sang nhánh tăng lớn.
+        micro_anchor = stream_state.micro_up_anchor
+        micro_center = stream_state.micro_up_center
+        if micro_anchor is not None:
+            returned_to_anchor = abs(z - micro_anchor) <= return_to_anchor_tolerance
+            promoted_to_large_shift = z >= x + upward_open_threshold
+            interrupted = gap_minutes > level_shift_max_gap
+            same_micro_plateau = (
+                micro_center is not None
+                and abs(z - micro_center) <= micro_up_tolerance
+                and z >= micro_anchor + micro_up_min
             )
+            if returned_to_anchor or interrupted or promoted_to_large_shift:
+                _clear_micro_up_candidate(stream_state)
+            elif same_micro_plateau:
+                stream_state.micro_up_samples.append(float(z))
+                stream_state.micro_up_times.append(sample_time)
+                stream_state.micro_up_samples = stream_state.micro_up_samples[-5:]
+                stream_state.micro_up_times = stream_state.micro_up_times[-5:]
+                stream_state.micro_up_center = float(np.median(stream_state.micro_up_samples))
+                micro_required = 4 if (not is_truly_parked or high_noise) else 3
+                micro_duration = 0.0
+                if len(stream_state.micro_up_times) >= 2:
+                    micro_first = _as_timestamp(stream_state.micro_up_times[0])
+                    micro_last = _as_timestamp(stream_state.micro_up_times[-1])
+                    if micro_first is not None and micro_last is not None:
+                        micro_duration = max(0.0, (micro_last - micro_first).total_seconds() / 60.0)
+                if len(stream_state.micro_up_samples) >= micro_required and micro_duration >= 4.0:
+                    _clear_micro_up_candidate(stream_state)
+                    # Sau khi cụm nhỏ đã bền vững, trả quyền cho Kalman trong
+                    # vài nhịp để tiến lên mượt thay vì nhảy thẳng.
+                    stream_state.micro_up_release_steps = int(config.get("micro_up_release_steps", 8))
+            else:
+                _clear_micro_up_candidate(stream_state)
+
+        if (
+            stream_state.micro_up_anchor is None
+            and stream_state.micro_up_release_steps == 0
+            and stream_state.level_candidate_direction is None
+            and recent_refuel_steps == 0
+            and z >= x + micro_up_min
+            and z < x + upward_open_threshold
+        ):
+            stream_state.micro_up_anchor = float(x)
+            stream_state.micro_up_center = float(z)
+            stream_state.micro_up_samples = [float(z)]
+            stream_state.micro_up_times = [sample_time]
+
+        candidate_direction = stream_state.level_candidate_direction
+        candidate_anchor = stream_state.level_candidate_anchor
+        candidate_center = stream_state.level_candidate_center
+        level_shift_min = float(stream_state.level_candidate_min_shift or major_shift_min)
+
+        # Quay về quanh nền ban đầu là bằng chứng mạnh cho nhiễu chữ U/hill;
+        # hủy ứng viên thay vì biến nó thành chuyển mức.
+        if candidate_direction is not None and candidate_anchor is not None:
+            if abs(z - candidate_anchor) <= return_to_anchor_tolerance:
+                _clear_level_candidate(stream_state)
+                candidate_direction = None
+            elif gap_minutes > level_shift_max_gap:
+                # Không được cộng dồn bằng chứng qua khoảng trống telemetry.
+                _clear_level_candidate(stream_state)
+                candidate_direction = None
+
+        if candidate_direction is None:
+            opens_down_candidate = False
+            if z >= x + upward_open_threshold:
+                stream_state.level_candidate_direction = "UP"
+                stream_state.level_candidate_anchor = float(x)
+                stream_state.level_candidate_center = float(z)
+                stream_state.level_candidate_min_shift = float(upward_open_threshold)
+                stream_state.level_candidate_required_points = level_shift_confirm_points
+                stream_state.level_candidate_samples = [float(z)]
+                stream_state.level_candidate_times = [sample_time]
+            else:
+                raw_drop_step = (
+                    previous_raw - z
+                    if not pd.isna(previous_raw)
+                    else 0.0
+                )
+                abrupt_down_step = max(event * 0.35, jitter * 2.0, noise * 3.0, 5.0)
+                model_supports_abrupt_down = (
+                    ai_state == "DOWNWARD_SHIFT"
+                    and float(confidence_values[i]) >= drain_min_confidence
+                    and raw_drop_step >= max(jitter * 1.5, noise * 2.0, 2.5)
+                )
+                opens_down_candidate = (
+                    z <= x - downward_open_threshold
+                    and (raw_drop_step >= abrupt_down_step or model_supports_abrupt_down)
+                )
+            if candidate_direction is None and opens_down_candidate:
+                stream_state.level_candidate_direction = "DOWN"
+                stream_state.level_candidate_anchor = float(x)
+                stream_state.level_candidate_center = float(z)
+                stream_state.level_candidate_min_shift = float(downward_open_threshold)
+                # Bắt đầu giảm khi đang chạy hoặc cửa sổ đang nhiễu cần thêm
+                # một mẫu: 4 điểm thay vì 3 điểm ở trạng thái đỗ ổn định.
+                stream_state.level_candidate_required_points = (
+                    max(4, level_shift_confirm_points)
+                    if (not is_truly_parked or high_noise)
+                    else level_shift_confirm_points
+                )
+                stream_state.level_candidate_samples = [float(z)]
+                stream_state.level_candidate_times = [sample_time]
+        else:
+            candidate_center = float(candidate_center if candidate_center is not None else z)
+            same_plateau = abs(z - candidate_center) <= plateau_tolerance
+            same_direction = (
+                (candidate_direction == "UP" and z >= x + level_shift_min)
+                or (candidate_direction == "DOWN" and z <= x - level_shift_min)
+            )
+            if same_plateau and same_direction:
+                stream_state.level_candidate_samples.append(float(z))
+                stream_state.level_candidate_times.append(sample_time)
+                # Bộ nhớ bị chặn; quyết định chỉ dùng 5 điểm gần nhất.
+                stream_state.level_candidate_samples = stream_state.level_candidate_samples[-5:]
+                stream_state.level_candidate_times = stream_state.level_candidate_times[-5:]
+                stream_state.level_candidate_center = float(np.median(stream_state.level_candidate_samples))
+            elif candidate_direction == "UP" and z > candidate_center + plateau_tolerance:
+                # Tăng nhiều bậc cùng hướng: giữ chuỗi để nhận ra một quá
+                # trình tăng thật, nhưng tâm so sánh chuyển sang bậc mới.
+                stream_state.level_candidate_center = float(z)
+                stream_state.level_candidate_samples.append(float(z))
+                stream_state.level_candidate_times.append(sample_time)
+                stream_state.level_candidate_samples = stream_state.level_candidate_samples[-5:]
+                stream_state.level_candidate_times = stream_state.level_candidate_times[-5:]
+            elif candidate_direction == "DOWN" and z < candidate_center - plateau_tolerance:
+                # Giảm thật thường đi qua nhiều bậc trước khi phẳng. Không
+                # reset bộ đếm ở từng bậc vì sẽ gây trễ hàng chục phút.
+                stream_state.level_candidate_center = float(z)
+                stream_state.level_candidate_samples.append(float(z))
+                stream_state.level_candidate_times.append(sample_time)
+                stream_state.level_candidate_samples = stream_state.level_candidate_samples[-5:]
+                stream_state.level_candidate_times = stream_state.level_candidate_times[-5:]
+            else:
+                # Đảo hướng hoặc không còn nằm ở cụm mới: đây là sloshing.
+                _clear_level_candidate(stream_state)
+
+        samples = stream_state.level_candidate_samples
+        duration = _candidate_duration_minutes(stream_state)
+        stable_spread = (max(samples) - min(samples)) if samples else np.inf
+        # Tính cả đoạn từ nền cũ tới ứng viên. Cụm mới có thể phẳng (173,
+        # 173, 173), khi đó directionality nội bộ bằng 0 nhưng rõ ràng vẫn là
+        # một dịch mức so với nền 170.
+        directional = _directionality(
+            [float(stream_state.level_candidate_anchor)] + samples
+            if stream_state.level_candidate_anchor is not None else samples
+        )
+        duration_ok = duration >= level_shift_min_duration or not sample_time
+        required_points = max(2, int(stream_state.level_candidate_required_points))
+        plateau_ready = (
+            len(samples) >= required_points
+            and duration_ok
+            and stable_spread <= plateau_tolerance
+            and directional >= 0.50
+            and ai_state != "IMPULSE_NOISE"
+        )
+        # Nhánh ramp chỉ được chốt nhanh khi mẫu hiện tại vẫn
+        # tiếp tục mở rộng mức theo đúng hướng. Trường hợp
+        # 824 -> 849.9 -> 847.5 đã quay đầu ở mẫu thứ ba; nếu chỉ
+        # nhìn directionality tổng thể thì nó vẫn rất cao và bị chốt
+        # nhầm thành UPWARD_LEVEL_SHIFT. Một lần tăng thật có quay
+        # đầu nhỏ vẫn có thể được xác nhận bằng plateau_ready sau
+        # khi mặt bằng cuối ổn định.
+        ramp_is_still_advancing = False
+        if len(samples) >= 2:
+            ramp_epsilon = max(noise * 0.25, 0.3)
+            if stream_state.level_candidate_direction == "UP":
+                ramp_is_still_advancing = samples[-1] >= max(samples[:-1]) - ramp_epsilon
+            elif stream_state.level_candidate_direction == "DOWN":
+                ramp_is_still_advancing = samples[-1] <= min(samples[:-1]) + ramp_epsilon
+
+        directional_ramp_ready = (
+            len(samples) >= required_points
+            and duration_ok
+            and directional >= 0.85
+            and ramp_is_still_advancing
+            and stream_state.level_candidate_anchor is not None
+            and abs(samples[-1] - stream_state.level_candidate_anchor) >= 1.5 * level_shift_min
+            and ai_state != "IMPULSE_NOISE"
+        )
+        candidate_ready = plateau_ready or directional_ramp_ready
+        if candidate_ready:
+            # Với ramp mạnh, điểm mới nhất phản ánh bậc hiện tại tốt hơn
+            # median; với mặt bằng phẳng dùng median để kháng nhiễu.
+            candidate_target = float(samples[-1] if directional_ramp_ready else np.median(samples))
+            confirmed_direction = stream_state.level_candidate_direction
+            if confirmed_direction == "UP":
+                candidate_confirmed_up = True
+            elif confirmed_direction == "DOWN":
+                candidate_confirmed_down = True
+            _clear_level_candidate(stream_state)
+        else:
+            candidate_target = np.nan
+        pending_level_shift = (
+            stream_state.level_candidate_direction is not None
+            or stream_state.micro_up_anchor is not None
         )
 
-        is_refuel = (labeled_refuel and (fast_step or rise_count >= 2)) or (
-            is_truly_parked
-            and ai_state not in {"OSCILLATION_NOISE", "IMPULSE_NOISE"}
-            and (z - x >= min_refuel_jump)
-            and fast_step
-        ) or sustained_refuel or (recent_refuel_steps > 0 and (z - x) >= 1.5)
+        # Giữ tên biến cũ để không phá API/config cũ. Ý nghĩa ở đây chỉ là
+        # UPWARD_LEVEL_SHIFT đã xác nhận, không kết luận đó là đổ nhiên liệu.
+        is_refuel = candidate_confirmed_up
+        if candidate_confirmed_down:
+            ai_state = "DOWNWARD_SHIFT"
+            drain_count = max(drain_count, 2)
 
         # Chọn Q/R theo trạng thái cuối cùng đã được AI + rule/memory xác nhận.
         if is_spike:
@@ -409,7 +699,14 @@ def filter_ai_enhanced_adaptive_realtime(
         elif is_refuel:
             R = cfg_ref_r
             Q_current = cfg_ref_q
-            recent_refuel_steps = 4
+            recent_refuel_steps = int(config.get("upward_continuation_steps", 10))
+            jump_to_z = True
+        elif candidate_confirmed_down:
+            # Bằng chứng chuỗi thời gian đã xác nhận phải có ưu tiên cao hơn
+            # RollingStd/high_noise; một chuyển mức thật tự nó cũng làm độ
+            # lệch chuẩn cửa sổ tăng mạnh.
+            R = cfg_drain_r
+            Q_current = cfg_drain_q
             jump_to_z = True
         elif ai_state == "OSCILLATION_NOISE" or high_noise:
             R = cfg_slosh_r
@@ -429,6 +726,36 @@ def filter_ai_enhanced_adaptive_realtime(
             Q_current = cfg_stable_q
             jump_to_z = False
 
+        # Nền làm mượt theo nhiễu đo thực tế và trạng thái AI; không ép R
+        # tăng theo dung tích bình.
+        if not is_spike and not jump_to_z and drain_count < 2 and not trap_recovery:
+            # R phan anh do tin cay cua phep do, khong phai kich thuoc binh.
+            # Dung tich chi con tham gia cac nguong dich muc o phia tren.
+            local_std = max(0.25, float(rolling_std[i]))
+            if ai_state == "OSCILLATION_NOISE" or high_noise:
+                sloshing_noise_r = float(config.get(
+                    "sloshing_noise_r",
+                    (6.0 * local_std) ** 2,
+                ))
+                R = max(float(R), sloshing_noise_r)
+            elif ai_state == "GRADUAL_CHANGE":
+                # RollingStd cua ramp gom ca do doc, khong binh phuong truc
+                # tiep nhu sloshing. Chi lay phan nhieu cuc bo vua phai.
+                gradual_noise_r = float(config.get(
+                    "gradual_noise_r",
+                    (2.0 * min(local_std, max(noise, 1.0))) ** 2,
+                ))
+                R = max(float(R), gradual_noise_r)
+                Q_current = max(float(Q_current), 0.5)
+            else:
+                stable_noise_r = float(config.get(
+                    "stable_noise_r",
+                    (3.0 * local_std) ** 2,
+                ))
+                R = max(float(R), stable_noise_r)
+                Q_current = max(float(Q_current), 0.15)
+
+
         # Thích nghi R và Q tự động theo độ dốc tiêu hao (bám sát dốc mượt mà không trễ)
         if not is_spike and not jump_to_z:
             if z < x - max(jitter * 0.4, 0.3):
@@ -436,31 +763,41 @@ def filter_ai_enhanced_adaptive_realtime(
                     lag_ratio = max(1.0, (x - z) / jitter)
                     R = max(2.0, R / (lag_ratio ** 1.2))
                     Q_current = max(Q_current, 0.25 * lag_ratio)
-                elif not is_truly_parked or ai_state in {"GRADUAL_CHANGE", "UNKNOWN"}:
+                elif (
+                    not pd.isna(previous_raw)
+                    and not pd.isna(previous_raw_2)
+                    and z <= previous_raw <= previous_raw_2
+                    and (not is_truly_parked or ai_state in {"GRADUAL_CHANGE", "UNKNOWN"})
+                ):
                     slope_lag = min(5.0, (x - z) / max(jitter * 0.5, 0.3))
                     R = max(4.0, R / slope_lag)
                     Q_current = max(Q_current, 0.35 * slope_lag)
-            elif z > x + jitter and (ai_state == "UPWARD_SHIFT" or recent_refuel_steps > 0):
-                lag_ratio = max(1.0, (z - x) / jitter)
-                R = max(1.0, R / (lag_ratio ** 1.5))
+            # Chiều tăng không được nới R chỉ vì một gai raw cao. Nó phải đi
+            # qua candidate ở trên; như vậy ân hạn không thể kéo x lên đỉnh U.
 
         # Cập nhật Kalman
         if jump_to_z:
-            x = float(z)
+            x = float(candidate_target) if not pd.isna(candidate_target) else float(z)
             P = 4.0
-            recent_refuel_steps = 4
+            if candidate_confirmed_down:
+                recent_refuel_steps = 0
         else:
-            P = P + Q_current
+            # Q là process noise theo một nhịp danh định. Khoảng 5 phút phải
+            # tạo uncertainty lớn hơn khoảng 2 phút, nhưng vẫn bị kẹp để gap
+            # bất thường không sinh một bước nhảy vô lý.
+            dt_scale = min(3.0, max(0.5, gap_minutes / dt_expected_minutes)) if gap_minutes > 0 else 1.0
+            P = P + Q_current * dt_scale
             K = P / (P + R)
-            x_new = x + K * (z - x)
+            diff = float(z) - x
+            shrink_threshold = max(1.5, jitter * 1.5)
+            diff_compressed = shrink_threshold * math.tanh(diff / shrink_threshold)
+            x_new = x + K * diff_compressed
             P = (1 - K) * P
 
-            # KHÓA DÂNG ẢO VẬT LÝ KHI XE ĐANG ĐỖ / SÓNG SÁNH:
-            # Nếu không có UPWARD_SHIFT đã xác nhận, không cho x leo theo các "quả đồi" sóng sánh
-            if not is_refuel and recent_refuel_steps == 0 and z > x + jitter:
-                x = x  # Khóa phẳng xuyên qua các đợt sóng sánh dâng ảo
-            else:
-                x = x_new  # Bám sát mượt mà dốc tiêu hao (không bị bậc thang vuông)
+            # Trong vùng dao động thông thường phải lọc đối xứng: khóa riêng
+            # chiều tăng sẽ tạo thiên lệch xuống và khiến các đoạn phục hồi
+            # bị treo. Gai lớn vẫn bị chặn bởi IMPULSE_NOISE/candidate.
+            x = x if pending_level_shift else x_new
 
         x = max(0.0, float(x))
         enhanced[i] = x
@@ -485,6 +822,7 @@ def filter_ai_enhanced_adaptive_realtime(
     stream_state.dropout_count = dropout_count
     stream_state.dropout_recovery_count = dropout_recovery_count
     stream_state.dropout_seen_near_zero = dropout_seen_near_zero
+    stream_state.dt_expected_minutes = float(dt_expected_minutes)
     if len(group):
         stream_state.segment_id = str(segment_values[-1]) or None
         last_time = _as_timestamp(time_values[-1])

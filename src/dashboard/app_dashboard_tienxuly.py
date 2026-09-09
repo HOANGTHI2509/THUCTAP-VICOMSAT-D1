@@ -14,6 +14,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '.
 # Custom Imports (Chỉ 2 thuật toán: Kalman truyền thống và AI-Enhanced Kalman Realtime)
 from src.core.filters import kalman_traditional as kalman
 from src.core.filters.ai_enhanced_adaptive_realtime import filter_ai_enhanced_adaptive_realtime
+from src.core.filters.ai_smooth_tracking_filter import filter_smooth_tracking_dataframe
 from src.core.filters.ai_state_filter import filter_with_ai_state, load_fuel_state_classifier
 from src.core.filters.anomaly_detector import FuelAnomalyDetector
 
@@ -398,6 +399,11 @@ with st.spinner("Đang chạy thuật toán lọc nhiễu..."):
         # 3.2. AI-Enhanced Kalman (Realtime / Causal)
         df_seg_subset = df_seg.loc[group.index]
         df_seg.loc[group.index, 'AI_Enhanced_Kalman_Realtime'] = filter_ai_enhanced_adaptive_realtime(df_seg_subset, config=ai_kalman_config)
+
+        # 3.3. AI Smooth-Tracking Filter (Mới: Bám sát & Làm mượt)
+        df_smooth = filter_smooth_tracking_dataframe(df_seg_subset, vehicle_id=selected_car, capacity_est=estimated_capacity)
+        df_seg.loc[group.index, 'AI_Smooth_Tracking'] = df_smooth['CleanFuel_SmoothTracking'].values
+        df_seg.loc[group.index, 'FuelRate_SmoothTracking'] = df_smooth['FuelRate_SmoothTracking'].values
 # Restore original order just in case
 df_seg = df_seg.sort_values("_OriginalOrder", kind="stable").drop(columns="_OriginalOrder")
 # Hide burn-in context after every derived column has been calculated.
@@ -445,6 +451,15 @@ for seg_id, group in df_seg.groupby('SegmentID', sort=False):
             mode='lines', name='AI-Enhanced Kalman (Realtime / Causal)',
             legendgroup='ai_enhanced_kalman_realtime', showlegend=show_legend,
             line=dict(color='#FF7F0E', width=2.5), connectgaps=True
+        ), row=1, col=1, secondary_y=False)
+
+    # 4. AI Smooth-Tracking Filter (Mới: Bám sát & Làm mượt)
+    if 'AI_Smooth_Tracking' in group.columns:
+        fig.add_trace(go.Scatter(
+            x=group['FuelTime'], y=group['AI_Smooth_Tracking'],
+            mode='lines', name='AI Smooth-Tracking (Mới: Bám sát & Mượt)',
+            legendgroup='ai_smooth_tracking', showlegend=show_legend,
+            line=dict(color='#AB63FA', width=2.5), connectgaps=True
         ), row=1, col=1, secondary_y=False)
 
     show_legend = False

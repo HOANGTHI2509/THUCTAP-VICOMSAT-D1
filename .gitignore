@@ -34,3 +34,26 @@ reports/
 
 # Files exceeding GitHub 100MB limit
 models/ml_causal_v2/random_forest_causal_v2.pkl
+
+# Testing & cache
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs & editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Temporary, logs & unneeded folders
+*.log
+*.tmp
+*.bak
+*.swp
+linhtinh/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
