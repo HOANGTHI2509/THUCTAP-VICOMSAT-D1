@@ -19,6 +19,7 @@ Thumbs.db
 
 # Data files (CSV, Excel, raw datasets, databases)
 *.csv
+!artifacts/evaluation/segment_metrics.csv
 *.xlsx
 *.xls
 *.parquet
