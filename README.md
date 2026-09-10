@@ -60,7 +60,7 @@ flowchart LR
 2. **Tầng chuẩn hóa (Sanitization & Validation)**: Kiểm tra định dạng thời gian ISO-8601, loại bỏ tọa độ GPS không hợp lệ (như `0, 0`), phát hiện giá trị âm, rớt về 0 hoặc vượt trần dung tích bình (`CapacityEst`).
 3. **Tầng xác định vận động (Motion Assessment)**: Kết hợp vận tốc tức thời và bán kính dịch chuyển GPS trong cửa sổ trượt 5 điểm gần nhất để gán nhãn trạng thái vận động (`MOVING`, `LOW_MOTION`, `UNCERTAIN`).
 4. **Tầng trích xuất đặc trưng (Causal Feature Extraction)**: Tính toán độ biến thiên, độ lệch chuẩn trượt, hướng dốc và điểm phân kỳ chỉ từ dữ liệu quá khứ.
-5. **Tầng phân loại tín hiệu AI (AI Signal State Classifier)**: Mô hình Random Forest sử dụng vector đặc trưng để phân loại dạng tín hiệu thành 5 lớp động học cốt lõi (`STABLE_JITTER`, `GRADUAL_CHANGE`, `OSCILLATION_NOISE`, `UPWARD_SHIFT`, `DOWNWARD_SHIFT`), kết hợp 3 cờ quy tắc vật lý thời gian thực (`SPIKE`, `SLOSHING`, `UNCERTAIN`).
+5. **Tầng phân loại tín hiệu AI (AI Signal State Classifier)**: Mô hình Random Forest sử dụng vector đặc trưng để phân loại dạng tín hiệu thành 5 trạng thái chuẩn (`STABLE_JITTER`, `GRADUAL_CHANGE`, `OSCILLATION_NOISE`, `UPWARD_SHIFT`, `DOWNWARD_SHIFT`).
 6. **Tầng lọc thích ứng Smooth-Tracking (Adaptive Kalman Core)**: Điều chỉnh động hiệp phương sai nhiễu đo $R$ và nhiễu hệ thống $Q$ dựa trên kết hợp giữa `SignalState`, `MotionState` và dung tích xe.
 7. **Tầng quản lý trạng thái xe (Vehicle State Store)**: Đóng gói và lưu vết State Context của xe (Kalman state, lịch sử đệm, bộ đếm xác nhận) vào RAM hoặc Redis (có khóa an toàn chống Race Condition).
 8. **Tầng xuất dữ liệu (Contract Delivery)**: Trả về kết quả JSON đồng nhất bao gồm giá trị sạch, cờ chất lượng và độ trễ tính toán (Latency).
@@ -182,29 +182,17 @@ Hệ thống xử lý từng điểm đo độc lập theo luồng JSON gửi l�
 
 ## 6. Phân tích và gắn nhãn dữ liệu (AI Data Labeling)
 
-### 6.1. Danh mục nhãn trạng thái tín hiệu (`SignalState`)
+### 6.1. Danh mục 5 nhãn trạng thái tín hiệu (`SignalState`)
 
-Hệ thống kết hợp giữa **mô hình AI 5 lớp** và **tầng lọc quy tắc vật lý 3 cờ** để hình thành 8 trạng thái tín hiệu đầu ra:
+Mô hình Machine Learning (Random Forest) được huấn luyện và phân loại trực tiếp trên đúng 5 lớp trạng thái tín hiệu (khớp 100% Ma trận nhầm lẫn 5x5):
 
-#### 6.1.1. 5 lớp trạng thái do mô hình AI huấn luyện & phân loại (Trùng khớp 100% Ma trận nhầm lẫn 5x5)
-Mô hình Machine Learning (Random Forest) được huấn luyện trực tiếp trên 5 lớp hình học động học:
-
-| Tên nhãn AI | Định nghĩa kỹ thuật | Hiện tượng vật lý thực tế |
+| Tên nhãn | Định nghĩa kỹ thuật | Hiện tượng vật lý thực tế |
 | :--- | :--- | :--- |
 | `STABLE_JITTER` | Dao động biên độ nhỏ quanh mức trung bình tĩnh (<= 0.8 L). | Xe dừng nổ máy, hoặc cảm biến rung cơ học khi đỗ. |
 | `GRADUAL_CHANGE` | Mức nhiên liệu giảm từ từ và đều đặn theo thời gian. | Tiêu hao nhiên liệu bình thường khi động cơ hoạt động. |
 | `OSCILLATION_NOISE` | Dao động nhiễu tần số cao, đổi hướng liên tục. | Xe đi qua ổ gà, gờ giảm tốc, đường gồ ghề. |
 | `UPWARD_SHIFT` | Mặt bằng tín hiệu dịch chuyển tăng đột ngột và duy trì mức mới. | Mức đo tăng bền vững (bước nhảy mức dương). |
 | `DOWNWARD_SHIFT` | Mặt bằng tín hiệu dịch chuyển giảm đột ngột và duy trì mức mới. | Mức đo sụt bền vững (bước nhảy mức âm). |
-
-#### 6.1.2. 3 trạng thái mở rộng nhận diện bằng tầng quy tắc vật lý thời gian thực (Rule-based Guards)
-Các trạng thái này được bộ điều phối nhận diện trực tiếp để tăng tính chính xác tuyệt đối:
-
-| Tên nhãn quy tắc | Định nghĩa kỹ thuật | Hiện tượng vật lý thực tế |
-| :--- | :--- | :--- |
-| `SPIKE` | 1–2 điểm đo nhảy vọt hoặc sụt nhọn bất thường rồi hồi về nền cũ ngay. | Nhiễu xung điện từ, chạm mass dây dẫn cảm biến. |
-| `SLOSHING` | Sóng sánh nhiên liệu chu kỳ 10–30s, đối xứng hai chiều (directionality < 0.35). | Nhiên liệu va đập dồn bình khi phanh hoặc tăng tốc. |
-| `UNCERTAIN` | Tín hiệu chưa đủ số điểm quan sát (vừa khởi tạo) hoặc GPS và vận tốc mâu thuẫn. | Trạng thái chuyển tiếp dữ liệu ban đầu hoặc mất GPS. |
 
 > **CẢNH BÁO QUAN TRỌNG VỀ RANH GIỚI NGHIỆP VỤ**:  
 > Nhãn `UPWARD_SHIFT` tuyệt đối không đồng nghĩa với "Sự kiện nạp dầu". Tương tự, `DOWNWARD_SHIFT` không đồng nghĩa với "Sự kiện trộm dầu". Đây chỉ là nhãn mô tả **hình học biến đổi của tín hiệu**. Tầng ứng dụng Đề tài 2 sẽ kết hợp thêm thời gian dừng, vận tốc trung bình và trạng thái bật máy để ra quyết định kinh doanh.

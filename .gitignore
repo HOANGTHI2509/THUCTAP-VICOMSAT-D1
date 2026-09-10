@@ -43,6 +43,8 @@ fix_ai.py
 temp_freeze.txt
 simulate_live_car.py
 project/.bolt/
+GEMINI.md
+HDSD_DOANH_NGHIEP.md
 
 # Redundant and legacy models
 models/fuel_state_classifier.pkl
