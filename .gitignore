@@ -35,6 +35,12 @@ fulltt/
 luuanh/
 reports/
 TestDoDoc/
+ThuNghiem/
+anh/
+scratch/
+cols.txt
+fix_ai.py
+temp_freeze.txt
 
 # Files exceeding GitHub 100MB limit
 models/ml_causal_v2/random_forest_causal_v2.pkl
