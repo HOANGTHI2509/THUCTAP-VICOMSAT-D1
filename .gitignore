@@ -26,6 +26,8 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+fuel_data.db
+project/public/data_*.json
 TienXuLy/
 data/
 dulieu/
