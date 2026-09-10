@@ -1,0 +1,9 @@
+﻿segment_id,review_status,points,raw_std_liters,clean_std_liters,raw_detrended_std_liters,clean_detrended_std_liters,noise_reduction_percent,raw_range_liters,clean_range_liters,spike_attenuation_liters,stable_level_mae_liters,final_downtrend_lag_liters,moving_upward_steps,regression_mae_liters,behavior_checks_passed,behavior_checks_total
+21H-02058_stationary_noise_pulse,initial_baseline_pending_domain_review,12,3.332781,0.114151,2.727304,0.109401,95.989,12.0,0.39,11.61,,,0,0.0,1,2
+21H-03221_short_valley_recovery,initial_baseline_pending_domain_review,12,4.793369,1.294086,4.17026,0.672699,83.869,13.2,2.82,10.38,,,0,0.0,3,3
+92H-02687_steady_moving_consumption,initial_baseline_pending_domain_review,10,1.34179,0.779741,0.375508,0.403181,-7.37,4.5,2.15,2.35,,2.35,0,0.0,3,3
+29E-44284_noisy_moving_consumption,initial_baseline_pending_domain_review,9,6.577571,6.800461,1.172714,0.703736,39.991,21.0,19.71,1.29,,1.29,0,0.0,3,3
+15H-08128_zero_dropout_hold,pending_domain_review,12,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,,0,0.0,2,2
+21H-03221_stationary_gps_cluster,pending_domain_review,12,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,,0,0.0,2,2
+21H-03221_u_shape_with_gps,pending_domain_review,12,4.793369,1.341159,4.17026,0.728923,82.521,13.2,2.85,10.35,,,0,0.0,2,2
+21H-03221_stationary_gps_jump,pending_domain_review,10,2.564001,0.063159,2.398239,0.024254,98.989,9.3,0.16,9.14,,2.64,0,0.0,2,2

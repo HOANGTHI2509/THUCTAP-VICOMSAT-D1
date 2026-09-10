@@ -1,0 +1,4 @@
+# Optional local-only visual dashboard. This file is intentionally not used by Docker.
+-r requirements.txt
+streamlit>=1.39.0
+plotly>=5.24.0

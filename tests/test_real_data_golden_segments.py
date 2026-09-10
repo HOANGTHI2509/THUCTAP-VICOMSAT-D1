@@ -24,20 +24,28 @@ GOLDEN_SEGMENTS = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 def _run_segment(segment: dict, model_dir: str = "") -> list[dict]:
     """Run a complete real-data window through one fresh causal context."""
     engine = AISmoothTrackingFilter(model_dir=model_dir)
-    return [
-        engine.process_point(
-            vehicle_id=segment["id"],
-            timestamp=timestamp,
-            raw_fuel=raw_fuel,
-            speed=speed,
-            capacity_est=segment["capacity_est_liters"],
+    results = []
+    latitudes = segment.get("latitudes", [None] * len(segment["timestamps"]))
+    longitudes = segment.get("longitudes", [None] * len(segment["timestamps"]))
+    for timestamp, raw_fuel, speed, latitude, longitude in zip(
+        segment["timestamps"],
+        segment["raw_liters"],
+        segment["speed_kmh"],
+        latitudes,
+        longitudes,
+    ):
+        results.append(
+            engine.process_point(
+                vehicle_id=segment["id"],
+                timestamp=timestamp,
+                raw_fuel=raw_fuel,
+                speed=speed,
+                capacity_est=segment["capacity_est_liters"],
+                lat=latitude,
+                lng=longitude,
+            )
         )
-        for timestamp, raw_fuel, speed in zip(
-            segment["timestamps"],
-            segment["raw_liters"],
-            segment["speed_kmh"],
-        )
-    ]
+    return results
 
 
 @pytest.mark.parametrize("segment", GOLDEN_SEGMENTS, ids=lambda item: item["id"])
@@ -45,15 +53,21 @@ def test_golden_source_window_still_matches_real_telemetry(segment: dict):
     """Keep the compact fixture auditable against the original processed CSV."""
     assert segment["review_status"] in {
         "initial_baseline_pending_domain_review",
+        "pending_domain_review",
         "approved",
     }
     source = PROJECT_ROOT / segment["source"]
+    if not source.is_file():
+        pytest.skip("Raw telemetry source is intentionally excluded from this checkout")
     start_row, end_row = segment["source_rows"]
     source_window = pd.read_csv(source).iloc[start_row : end_row + 1]
 
     assert source_window["FuelTime"].astype(str).tolist() == segment["timestamps"]
     assert source_window["FuelLevel"].round(2).tolist() == segment["raw_liters"]
     assert source_window["Speed"].fillna(0.0).round(2).tolist() == segment["speed_kmh"]
+    if "latitudes" in segment:
+        assert source_window["Lat"].round(6).tolist() == segment["latitudes"]
+        assert source_window["Lng"].round(6).tolist() == segment["longitudes"]
 
 
 @pytest.mark.parametrize("segment", GOLDEN_SEGMENTS, ids=lambda item: item["id"])
@@ -78,6 +92,7 @@ def test_golden_production_model_regression(segment: dict):
 def test_golden_signal_behavior_contract(segment: dict):
     """Give failures a business-readable reason in addition to exact curves."""
     clean = [item["clean_fuel"] for item in _run_segment(segment)]
+    output = _run_segment(segment)
     raw = segment["raw_liters"]
     checks = segment["checks"]
 
@@ -96,3 +111,11 @@ def test_golden_signal_behavior_contract(segment: dict):
         assert clean[-1] - raw[-1] <= checks["max_final_lag_liters"]
     if "max_step_size" in checks:
         assert max(abs(next_value - value) for value, next_value in zip(clean, clean[1:])) <= checks["max_step_size"]
+    if "zero_dropout_indexes" in checks:
+        for index in checks["zero_dropout_indexes"]:
+            assert output[index]["quality_flag"] == "ZERO_DROPOUT_HELD"
+            assert output[index]["clean_fuel"] == output[index - 1]["clean_fuel"]
+    if "required_motion_states" in checks:
+        assert set(checks["required_motion_states"]).issubset(
+            {item["motion_state"] for item in output}
+        )
