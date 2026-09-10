@@ -412,7 +412,66 @@ class TestHistoryAndExportAPI:
 
 
 # ============================================================================
-# 8. STANDALONE RUNNER (Ho tro chay truc tiep kiem tra Live Server / Container)
+# 8. TEST SUITE: Security & API Key Authentication Middleware
+# ============================================================================
+class TestSecurityMiddleware:
+    def test_security_middleware_when_enabled(self, monkeypatch):
+        """Kiem tra middleware chan toan bo endpoint ghi/loc du lieu khi bat REQUIRE_API_KEY=true."""
+        import src.service.api as api_mod
+
+        monkeypatch.setattr(api_mod, "REQUIRE_API_KEY", True)
+        monkeypatch.setattr(api_mod, "API_KEY", "test_secret_key_123")
+
+        # 1. Endpoint public (health) phai van truy cap duoc khong can key
+        r_health = client.get("/api/v1/health")
+        assert r_health.status_code == 200
+
+        # 2. Endpoint /api/v1/clean bi chan neu khong co key, cho qua neu dung key
+        r_clean_blocked = client.post("/api/v1/clean", json={
+            "vehicle_id": "29E-SEC-01",
+            "timestamp": "2026-08-27 10:00:00",
+            "raw_fuel": 100.0,
+        })
+        assert r_clean_blocked.status_code == 401
+        assert r_clean_blocked.json()["error_code"] == "UNAUTHORIZED"
+
+        r_clean_ok = client.post(
+            "/api/v1/clean",
+            json={"vehicle_id": "29E-SEC-01", "timestamp": "2026-08-27 10:00:00", "raw_fuel": 100.0},
+            headers={"X-API-Key": "test_secret_key_123"},
+        )
+        assert r_clean_ok.status_code == 200
+
+        # 3. Endpoint /api/v1/fuel/clean-point bi chan neu khong co key
+        r_fuel_blocked = client.post("/api/v1/fuel/clean-point", json={
+            "VehicleID": "29E-SEC-01",
+            "FuelTime": "2026-08-27T10:00:00",
+            "FuelLevel": 100.0,
+        })
+        assert r_fuel_blocked.status_code == 401
+
+        # 4. Endpoint /api/push bi chan neu khong co key, cho qua neu dung Bearer token
+        r_push_blocked = client.post("/api/push", json={"vehicle_id": "29E-SEC-01", "raw": 100.0})
+        assert r_push_blocked.status_code == 401
+
+        r_push_ok = client.post(
+            "/api/push",
+            json={"vehicle_id": "29E-SEC-01", "raw": 100.0},
+            headers={"Authorization": "Bearer test_secret_key_123"},
+        )
+        assert r_push_ok.status_code == 200
+
+        # 5. Endpoint /api/switch-vehicle bi chan neu khong co key
+        r_switch_blocked = client.post("/api/switch-vehicle", json={"vehicle_id": "29E-SEC-01"})
+        assert r_switch_blocked.status_code == 401
+
+        # 6. Endpoint /api/export_history bi chan neu khong co key
+        r_export_blocked = client.get("/api/export_history?vehicle_id=29E-SEC-01")
+        assert r_export_blocked.status_code == 401
+
+
+# ============================================================================
+# 9. STANDALONE RUNNER (Ho tro chay truc tiep kiem tra Live Server / Container)
 # ============================================================================
 def run_standalone_test(base_url: str = None):
     """Chay toan bo test suite va in bao cao mau sac truc quan ra terminal."""

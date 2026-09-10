@@ -31,6 +31,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -43,28 +44,43 @@ app.add_middleware(
 @app.middleware("http")
 async def security_api_key_middleware(request: Request, call_next):
     """
-    Middleware xác thực API Key linh hoạt cho môi trường Doanh nghiệp.
+    Middleware xác thực API Key cho môi trường Doanh nghiệp.
     Mặc định REQUIRE_API_KEY=false để môi trường Local Demo không bị chặn.
+    Khi REQUIRE_API_KEY=true, bảo vệ toàn bộ các endpoint ghi/lọc dữ liệu:
+    - Mọi endpoint /api/v1/* (ngoại trừ /api/v1/health)
+    - /api/push, /api/switch-vehicle, /api/export_history
     """
     path = request.url.path
-    if REQUIRE_API_KEY and (path.startswith("/api/v1/clean") or path.startswith("/api/v1/events")):
-        api_key_header = request.headers.get("X-API-Key")
-        auth_header = request.headers.get("Authorization")
-        token = None
-        if api_key_header:
-            token = api_key_header.strip()
-        elif auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ", 1)[1].strip()
+    if REQUIRE_API_KEY:
+        # Whitelist các endpoint công khai không cần API Key
+        is_public = (
+            path == "/api/v1/health"
+            or path in ("/docs", "/redoc", "/openapi.json")
+            or path.startswith(("/docs/", "/static/"))
+        )
+        is_protected = not is_public and (
+            path.startswith("/api/v1/")
+            or path in ("/api/push", "/api/switch-vehicle", "/api/export_history")
+            or path.startswith("/api/push")
+        )
+        if is_protected:
+            api_key_header = request.headers.get("X-API-Key")
+            auth_header = request.headers.get("Authorization")
+            token = None
+            if api_key_header:
+                token = api_key_header.strip()
+            elif auth_header and auth_header.startswith("Bearer "):
+                token = auth_header.split(" ", 1)[1].strip()
 
-        if not token or token != API_KEY:
-            return JSONResponse(
-                status_code=401,
-                content={
-                    "status": "error",
-                    "error_code": "UNAUTHORIZED",
-                    "message": "API Key không hợp lệ hoặc thiếu trong Header X-API-Key (hoặc Authorization: Bearer <KEY>).",
-                },
-            )
+            if not token or token != API_KEY:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "status": "error",
+                        "error_code": "UNAUTHORIZED",
+                        "message": "API Key không hợp lệ hoặc thiếu trong Header X-API-Key (hoặc Authorization: Bearer <KEY>).",
+                    },
+                )
     return await call_next(request)
 
 
