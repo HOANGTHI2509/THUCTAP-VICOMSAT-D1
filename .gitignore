@@ -41,9 +41,13 @@ scratch/
 cols.txt
 fix_ai.py
 temp_freeze.txt
+simulate_live_car.py
+project/.bolt/
 
-# Files exceeding GitHub 100MB limit
-models/ml_causal_v2/random_forest_causal_v2.pkl
+# Redundant and legacy models
+models/fuel_state_classifier.pkl
+models/ml_causal_v2/
+models/rf_signal_state_causal_v2/
 
 # Testing & cache
 .pytest_cache/
