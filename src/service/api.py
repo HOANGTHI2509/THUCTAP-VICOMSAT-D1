@@ -79,52 +79,41 @@ db_manager = get_db_manager(DATABASE_URL)
 class EnterprisePointInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    vehicle_id: str = Field(..., validation_alias=AliasChoices("vehicle_id", "bien_so", "car_id", "VehicleID"), example="29H-75028")
-    timestamp: str = Field(..., validation_alias=AliasChoices("timestamp", "time", "thoi_gian", "FuelTime"), example="2026-08-15 09:16:00")
-    raw_fuel: float = Field(..., validation_alias=AliasChoices("raw_fuel", "fuel", "xang_tho", "FuelLevel", "raw"), example=93.3)
-    speed: float = Field(0.0, validation_alias=AliasChoices("speed", "van_toc", "Speed"), example=61.0)
-    distance_m: float = Field(0.0, validation_alias=AliasChoices("distance_m", "quang_duong", "DistanceMeters"), example=0.0)
-    lat: Optional[float] = Field(None, validation_alias=AliasChoices("lat", "vi_do", "Lat"), example=21.0285)
-    lng: Optional[float] = Field(None, validation_alias=AliasChoices("lng", "kinh_do", "Lng"), example=105.8542)
+    vehicle_id: str = Field(..., validation_alias=AliasChoices("vehicle_id", "bien_so", "car_id", "VehicleID"), json_schema_extra={"example": "29H-75028"})
+    timestamp: str = Field(..., validation_alias=AliasChoices("timestamp", "time", "thoi_gian", "FuelTime"), json_schema_extra={"example": "2026-08-15 09:16:00"})
+    raw_fuel: float = Field(..., validation_alias=AliasChoices("raw_fuel", "fuel", "xang_tho", "FuelLevel", "raw"), json_schema_extra={"example": 93.3})
+    speed: float = Field(0.0, validation_alias=AliasChoices("speed", "van_toc", "Speed"), json_schema_extra={"example": 61.0})
+    distance_m: float = Field(0.0, validation_alias=AliasChoices("distance_m", "quang_duong", "DistanceMeters"), json_schema_extra={"example": 0.0})
+    lat: Optional[float] = Field(None, validation_alias=AliasChoices("lat", "vi_do", "Lat"), json_schema_extra={"example": 21.0285})
+    lng: Optional[float] = Field(None, validation_alias=AliasChoices("lng", "kinh_do", "Lng"), json_schema_extra={"example": 105.8542})
     address: Optional[str] = Field(None, validation_alias=AliasChoices("address", "dia_chi", "Address"))
-    capacity_est: Optional[float] = Field(None, validation_alias=AliasChoices("capacity_est", "dung_tich", "capacity"), example=95.0)
-
-
-class EnterpriseCleanResponse(BaseModel):
-    vehicle_id: str
-    timestamp: str
-    raw_fuel: float
-    clean_fuel: float
-    speed: float
-    ai_state: str
-    ai_state_desc: str
-    event_label: str
-    confidence: float
-    is_refuel: bool
-    is_drain: bool
-    is_spike: bool
-    processing_time_ms: float
-    saved_to_db: bool
+    capacity_est: Optional[float] = Field(None, validation_alias=AliasChoices("capacity_est", "CapacityEst", "dung_tich", "capacity"), json_schema_extra={"example": 95.0})
 
 
 class EnterpriseBatchInput(BaseModel):
     points: List[EnterprisePointInput]
+
+
 class FuelPointInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    vehicle_id: str = Field(..., alias="VehicleID", example="29E-45520", description="Mã định danh hoặc biển số xe")
-    fuel_time: datetime = Field(..., alias="FuelTime", example="2026-08-27T10:00:00", description="Thời điểm ghi nhận telemetry")
-    fuel_level: float = Field(..., alias="FuelLevel", example=105.2, description="Mức nhiên liệu đo thô từ cảm biến (Lít)")
-    speed: float = Field(0.0, alias="Speed", example=45.0, description="Vận tốc GPS của xe (km/h)")
-    lat: Optional[float] = Field(None, alias="Lat", example=21.0285, description="Vĩ độ GPS")
-    lng: Optional[float] = Field(None, alias="Lng", example=105.8542, description="Kinh độ GPS")
+    vehicle_id: str = Field(..., alias="VehicleID", json_schema_extra={"example": "29E-45520"}, description="Mã định danh hoặc biển số xe")
+    fuel_time: datetime = Field(..., alias="FuelTime", json_schema_extra={"example": "2026-08-27T10:00:00"}, description="Thời điểm ghi nhận telemetry")
+    fuel_level: float = Field(..., alias="FuelLevel", json_schema_extra={"example": 105.2}, description="Mức nhiên liệu đo thô từ cảm biến (Lít)")
+    speed: float = Field(0.0, alias="Speed", json_schema_extra={"example": 45.0}, description="Vận tốc GPS của xe (km/h)")
+    lat: Optional[float] = Field(None, alias="Lat", json_schema_extra={"example": 21.0285}, description="Vĩ độ GPS")
+    lng: Optional[float] = Field(None, alias="Lng", json_schema_extra={"example": 105.8542}, description="Kinh độ GPS")
     address: Optional[str] = Field(None, alias="Address", description="Địa chỉ GPS (nếu có)")
     
     # Các trường mở rộng (Không bắt buộc Vcomsat phải gửi, tự fallback mặc định)
-    distance_meters: float = Field(0.0, example=350.0, description="Quãng đường (không bắt buộc)")
-    segment_id: Optional[str] = Field(None, example="SEG_01")
-    capacity_est: Optional[float] = Field(200.0, example=200.0)
-    noise_sigma_liters: Optional[float] = Field(0.8, example=0.8)
+    distance_meters: float = Field(0.0, json_schema_extra={"example": 350.0}, description="Quãng đường (không bắt buộc)")
+    segment_id: Optional[str] = Field(None, json_schema_extra={"example": "SEG_01"})
+    capacity_est: Optional[float] = Field(
+        None,
+        validation_alias=AliasChoices("capacity_est", "CapacityEst", "capacity"),
+        json_schema_extra={"example": 200.0},
+    )
+    noise_sigma_liters: Optional[float] = Field(0.8, json_schema_extra={"example": 0.8})
 
 
 class CleanFuelOutput(BaseModel):
@@ -134,7 +123,16 @@ class CleanFuelOutput(BaseModel):
     fuel_time: str = Field(..., alias="FuelTime")
     raw_fuel_liters: float = Field(..., alias="RawFuel")
     clean_fuel_liters: float = Field(..., alias="CleanFuel")
-    ai_signal_state: str = Field(..., alias="AI_State")
+    signal_state: str = Field(
+        ...,
+        validation_alias=AliasChoices(
+            "signal_state",
+            "ai_signal_state",
+            "SignalState",
+            "AI_State",
+        ),
+        serialization_alias="SignalState",
+    )
     confidence: float = Field(..., alias="Confidence")
     quality_flag: str = Field(..., alias="QualityFlag")
     latency_ms: float = Field(..., alias="LatencyMs")
@@ -144,7 +142,7 @@ class CleanFuelOutput(BaseModel):
 
 
 class FuelBatchInput(BaseModel):
-    vehicle_id: str = Field(..., example="29E-45520")
+    vehicle_id: str = Field(..., json_schema_extra={"example": "29E-45520"})
     points: List[FuelPointInput]
 
 
@@ -166,18 +164,19 @@ def health_check() -> Dict[str, Any]:
         "model_loaded": state_manager.model is not None,
         "model_type": "AI_Smooth_Tracking_Causal",
         "active_vehicles_in_memory": state_manager.active_vehicle_count,
+        "state_store": state_manager.state_store_health(),
         "database_enabled": db_manager.enabled,
         "api_key_required": REQUIRE_API_KEY,
         "timestamp": datetime.now().isoformat(),
     }
 
 
-@app.post("/api/v1/clean", response_model=EnterpriseCleanResponse, tags=["Enterprise API"])
-def enterprise_clean_point(point: EnterprisePointInput) -> EnterpriseCleanResponse:
+@app.post("/api/v1/clean", response_model=CleanFuelOutput, tags=["Enterprise API"])
+def enterprise_clean_point(point: EnterprisePointInput) -> CleanFuelOutput:
     """
     Endpoint chuẩn Doanh nghiệp: Nhận 1 điểm đo thô (hỗ trợ bí danh tiếng Anh/Việt)
-    -> Lọc AI-Kalman thời gian thực -> Tự lưu vào CSDL 3NF (nếu bật DB)
-    -> Trả ngay JSON kết quả song ngữ (< 5ms).
+    -> Lọc AI-Kalman thời gian thực -> Tự lưu phép đo vào CSDL 3NF (nếu bật DB)
+    -> Trả ngay JSON theo contract Đề tài 1.
     """
     res = sdk_engine.clean_point(
         vehicle_id=point.vehicle_id,
@@ -190,9 +189,8 @@ def enterprise_clean_point(point: EnterprisePointInput) -> EnterpriseCleanRespon
         capacity_est=point.capacity_est,
     )
 
-    saved_to_db = False
     if db_manager.enabled:
-        log_id = db_manager.save_measurement(
+        db_manager.save_measurement(
             vehicle_id=point.vehicle_id,
             timestamp=point.timestamp,
             raw_fuel=point.raw_fuel,
@@ -200,47 +198,26 @@ def enterprise_clean_point(point: EnterprisePointInput) -> EnterpriseCleanRespon
             speed=point.speed,
             lat=point.lat,
             lng=point.lng,
-            state_code=res["ai_state"],
+            state_code=res["signal_state"],
             capacity_est=point.capacity_est,
         )
-        if log_id:
-            saved_to_db = True
-
-        # Tự động lưu biến cố vào bảng fuel_events
-        if res["is_refuel"]:
-            db_manager.save_event(
-                vehicle_id=point.vehicle_id,
-                event_type="REFUEL",
-                start_time=point.timestamp,
-                end_time=point.timestamp,
-                start_fuel=point.raw_fuel,
-                end_fuel=res["clean_fuel"],
-                change_liters=round(res["clean_fuel"] - point.raw_fuel, 2),
-                lat=point.lat,
-                lng=point.lng,
-                address=point.address,
-                capacity_est=point.capacity_est,
-            )
-        elif res["is_drain"]:
-            db_manager.save_event(
-                vehicle_id=point.vehicle_id,
-                event_type="DRAIN",
-                start_time=point.timestamp,
-                end_time=point.timestamp,
-                start_fuel=point.raw_fuel,
-                end_fuel=res["clean_fuel"],
-                change_liters=round(point.raw_fuel - res["clean_fuel"], 2),
-                lat=point.lat,
-                lng=point.lng,
-                address=point.address,
-                capacity_est=point.capacity_est,
-            )
-
-    return EnterpriseCleanResponse(**res, saved_to_db=saved_to_db)
+    return CleanFuelOutput(
+        vehicle_id=res["vehicle_id"],
+        fuel_time=res["timestamp"],
+        raw_fuel_liters=res["raw_fuel"],
+        clean_fuel_liters=res["clean_fuel"],
+        signal_state=res["signal_state"],
+        confidence=res["confidence"],
+        quality_flag=res["quality_flag"],
+        latency_ms=res["processing_time_ms"],
+        motion_state=res["motion_state"],
+        motion_confidence=res["motion_confidence"],
+        gps_displacement_meters=res["gps_displacement_meters"],
+    )
 
 
-@app.post("/api/v1/clean-batch", response_model=List[EnterpriseCleanResponse], tags=["Enterprise API"])
-def enterprise_clean_batch(batch: EnterpriseBatchInput) -> List[EnterpriseCleanResponse]:
+@app.post("/api/v1/clean-batch", response_model=List[CleanFuelOutput], tags=["Enterprise API"])
+def enterprise_clean_batch(batch: EnterpriseBatchInput) -> List[CleanFuelOutput]:
     """
     Endpoint chuẩn Doanh nghiệp: Xử lý hàng loạt theo mảng (10-500 điểm)
     cho các thiết bị truyền dữ liệu theo cụm.
@@ -252,9 +229,14 @@ def enterprise_clean_batch(batch: EnterpriseBatchInput) -> List[EnterpriseCleanR
     return results
 
 
-@app.get("/api/v1/events", tags=["Enterprise API"])
+@app.get(
+    "/api/v1/events",
+    tags=["Legacy"],
+    deprecated=True,
+    include_in_schema=False,
+)
 def get_vehicle_events(vehicle_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-    """Tra cứu các sự kiện đổ xăng hoặc nghi ngờ rút trộm dầu từ bảng CSDL 3NF."""
+    """Legacy downstream records; the Topic 1 service never creates them."""
     if not db_manager.enabled:
         return []
     return db_manager.get_events(vehicle_id=vehicle_id, limit=limit)
@@ -285,6 +267,11 @@ def clean_fuel_point(point: FuelPointInput) -> CleanFuelOutput:
             "ai_enhanced": res["clean_fuel_liters"],
             "ai_smooth_tracking": res["clean_fuel_liters"],
             "smooth_tracking": res["clean_fuel_liters"],
+            "signal_state": res["signal_state"],
+            "quality_flag": res["quality_flag"],
+            "motion_state": res["motion_state"],
+            "motion_confidence": res["motion_confidence"],
+            "gps_displacement_meters": res["gps_displacement_meters"],
             "lat": point.lat or 0.0,
             "lng": point.lng or 0.0,
             "address": point.address or "",
@@ -363,13 +350,6 @@ def switch_live_vehicle(payload: Dict[str, Any]) -> Dict[str, Any]:
     queue_manager.switch_active_vehicle(vehicle_id)
     cur_data = queue_manager.get_vehicle_data(vehicle_id)
     return {"status": "switched", "vehicle_id": vehicle_id, "total_points": len(cur_data)}
-
-
-@app.post("/api/v1/vehicles/{vehicle_id}/reset-state", tags=["Web App Live Demo"])
-def reset_vehicle_state(vehicle_id: str) -> Dict[str, Any]:
-    """Xóa sạch buffer và reset bộ lọc của xe để chuẩn bị nhận luồng streaming mới."""
-    queue_manager.clear_vehicle(vehicle_id)
-    return {"status": "ok", "message": f"Đã reset dữ liệu và trạng thái xe {vehicle_id}"}
 
 
 @app.get("/api/vehicles", tags=["Web App Live Demo"])
@@ -508,7 +488,7 @@ def export_history(vehicle_id: str = "24H-04650", start_date: str = "", end_date
 
 @app.get("/api/v1/vehicles", tags=["Vehicle State Management"])
 def list_vehicles() -> List[Dict[str, Any]]:
-    """Liệt kê danh sách các xe và trạng thái bộ lọc đang được duy trì trong bộ nhớ In-Memory."""
+    """Liệt kê các xe có context đang hoạt động trong tiến trình service."""
     return state_manager.list_active_vehicles()
 
 

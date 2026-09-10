@@ -6,6 +6,8 @@ khong su dung diem tuong lai.
 ## Cau truc
 
 - `config.py`: tham so Q/R, nguong van toc, jitter va chuyen muc.
+- `contracts.py`: tu dien chuan cho `SignalState`, `QualityFlag` va
+  `MotionState`; dong thoi anh xa cac ten cu de tuong thich nguoc.
 - `state.py`: state tung xe va cac kieu bang chung cua so.
 - `features.py`: rolling statistics, directionality, trend va feature cho model.
 - `kalman.py`: chon Q/R thich nghi va cap nhat Kalman.
@@ -33,6 +35,11 @@ result = engine.process_point(
 
 File `ai_smooth_tracking_filter.py` chi la facade tuong thich nguoc. Code moi nen
 import tu package `smooth_tracking`.
+
+Output chuan cua de tai 1 la `CleanFuel`, `SignalState`, `QualityFlag` va
+`MotionState`. Cac state mo ta dac tinh tin hieu, khong ket luan su kien nap/rut
+nhien lieu. State cua tung xe co the duoc luu qua lop `StateStore` cua service;
+RAM la mac dinh va Redis la lua chon production.
 
 ## Nguyen tac tinh chinh
 

@@ -59,7 +59,7 @@ def smooth_kalman_update(
         context.drop_count = 0
 
     downward_supported = (
-        ai_state in ("GRADUAL_CHANGE", "DOWNWARD_SHIFT", "DRAIN")
+        ai_state in ("GRADUAL_CHANGE", "DOWNWARD_SHIFT")
         or (is_moving and context.drop_count >= 3 and window.directional_down)
         or trend.robust_downtrend
     )

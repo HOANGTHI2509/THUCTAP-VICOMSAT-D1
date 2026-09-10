@@ -1,135 +1,161 @@
-# Tài liệu Tích hợp API: Real-time Fuel Denoising Microservice
+# VICOMSAT Topic 1 — Realtime Fuel Denoising API
 
-## 1. Tổng quan Kiến trúc
+## 1. Phạm vi
 
-Microservice xử lý nhiễu nhiên liệu được thiết kế chuyên biệt cho hệ thống giám sát hành trình của VICOMSAT. 
-Dịch vụ nhận luồng dữ liệu thô từ cảm biến nhiên liệu, áp dụng mô hình **Causal AI (Random Forest)** để nhận diện trạng thái, và sử dụng **Adaptive Kalman Filter** để làm sạch nhiễu thời gian thực.
+Dịch vụ nhận dữ liệu cảm biến nhiên liệu đã quy đổi sang lít, vận tốc và GPS tùy chọn; đầu ra là mức nhiên liệu đã làm sạch theo thời gian thực. Bộ lọc chỉ dùng điểm hiện tại và lịch sử của đúng xe đó.
 
-Đặc điểm cốt lõi:
-- **In-Memory State Management:** Tự động duy trì trạng thái của hàng nghìn xe trong RAM mà không cần dùng đến database hay Redis.
-- **Auto-Reset:** Tự động xoá trạng thái của xe nếu không có tín hiệu mới quá 120 phút.
-- **Latency tối ưu:** Thời gian xử lý trung bình `< 80ms / điểm`.
+Dịch vụ **không kết luận** nạp nhiên liệu, rút trộm, bật/tắt máy hay trạng thái đỗ. Các nghiệp vụ này thuộc tầng phân tích phía sau (đề tài 2).
 
----
+## 2. Endpoint chính
 
-## 2. Thông tin Kết nối
-- **Giao thức:** HTTP/RESTful
-- **Cổng mặc định (Docker):** `8000`
-- **Tài liệu Swagger UI:** `http://<domain_hoac_ip>:8000/docs`
+### `POST /api/v1/fuel/clean-point`
 
----
+Request chuẩn:
 
-## 3. Các API Endpoints Chi tiết
-
-### 3.1. Nhận dữ liệu Streaming từng điểm (Single Point)
-Sử dụng endpoint này khi thiết bị GPS bắn dữ liệu từng nhịp (ví dụ: mỗi 5-10 giây/lần).
-
-- **Endpoint:** `POST /api/v1/fuel/clean-point`
-- **Content-Type:** `application/json`
-
-**Request Payload:**
 ```json
 {
-  "vehicle_id": "29E-45520",
-  "fuel_time": "2026-08-27T10:00:00",
-  "fuel_level": 105.0,
-  "speed": 45.0,
-  "lat": 21.0285,
-  "lng": 105.8542,
-  "distance_meters": 350.0,
-  "capacity_est": 200.0,
-  "noise_sigma_liters": 0.8
-}
-```
-*(Ghi chú: `capacity_est` và `noise_sigma_liters` là không bắt buộc. Nếu không có, API sẽ tự động cấu hình mặc định (200L, 0.8L) hoặc cấu hình động theo lịch sử xe).*
-
-**Response (200 OK):**
-```json
-{
-  "vehicle_id": "29E-45520",
-  "fuel_time": "2026-08-27T10:00:00",
-  "raw_fuel_liters": 105.0,
-  "clean_fuel_liters": 104.8,
-  "ai_signal_state": "GRADUAL_CHANGE",
-  "confidence": 0.98,
-  "quality_flag": "VALID",
-  "latency_ms": 68.5
+  "VehicleID": "21H-02058",
+  "FuelTime": "2026-08-13T10:54:00",
+  "FuelLevel": 175.2,
+  "Speed": 32.0,
+  "Lat": 21.0285,
+  "Lng": 105.8542,
+  "CapacityEst": 200.0
 }
 ```
 
-**Các trạng thái `ai_signal_state` trả về:**
-- `STABLE_JITTER`: Nhiễu tĩnh, xe đang đỗ.
-- `GRADUAL_CHANGE`: Xe đang chạy, tiêu hao từ từ.
-- `OSCILLATION_NOISE`: Nhiễu sóng sánh hoặc hố sụt mất tín hiệu.
-- `UPWARD_SHIFT`: Nạp nhiên liệu thực sự (bơm xăng).
-- `DOWNWARD_SHIFT`: Sự cố sụt giảm nhiên liệu bất thường khi xe đỗ.
+Tên trường dạng snake_case (`vehicle_id`, `fuel_time`, `fuel_level`, ...) vẫn được chấp nhận. `Lat`, `Lng` và `CapacityEst` không bắt buộc.
 
----
+Response chuẩn:
 
-### 3.2. Nhận dữ liệu theo gói (Batch Processing)
-Sử dụng endpoint này để đồng bộ lại dữ liệu khi thiết bị vào vùng mất sóng và bắn lại 1 mảng các điểm dữ liệu.
-
-- **Endpoint:** `POST /api/v1/fuel/clean-batch`
-- **Content-Type:** `application/json`
-
-**Request Payload:**
 ```json
 {
-  "vehicle_id": "29E-45520",
-  "points": [
-    {
-      "vehicle_id": "29E-45520",
-      "fuel_time": "2026-08-27T10:00:00",
-      "fuel_level": 105.0,
-      "speed": 0.0
-    },
-    {
-      "vehicle_id": "29E-45520",
-      "fuel_time": "2026-08-27T10:05:00",
-      "fuel_level": 103.5,
-      "speed": 50.0
-    }
-  ]
+  "VehicleID": "21H-02058",
+  "FuelTime": "2026-08-13T10:54:00",
+  "RawFuel": 175.2,
+  "CleanFuel": 174.8,
+  "SignalState": "STABLE_JITTER",
+  "Confidence": 1.0,
+  "QualityFlag": "SMOOTH_KALMAN",
+  "LatencyMs": 2.4,
+  "MotionState": "MOVING",
+  "MotionConfidence": 0.95,
+  "GpsDisplacementMeters": 88.9
 }
 ```
 
-**Response (200 OK):** Trả về mảng `results` chứa dữ liệu sạch cho từng điểm.
+`AI_State`/`ai_signal_state` là alias tương thích trong code Python cũ. Client tích hợp mới phải dùng `SignalState`.
 
----
+### `POST /api/v1/fuel/clean-batch`
 
-### 3.3. Các Endpoint Quản trị Hệ thống
+Nhận các điểm của một xe và xử lý theo thứ tự `FuelTime`. Mỗi phần tử trong `results` có cùng schema với endpoint một điểm.
 
-| Method | Endpoint | Mục đích |
-| :--- | :--- | :--- |
-| `GET` | `/api/v1/health` | Kiểm tra trạng thái hoạt động của Service (Alive, Model loaded). |
-| `GET` | `/api/v1/vehicles` | Xem danh sách các xe đang được lưu trữ State trong RAM. |
-| `POST`| `/api/v1/vehicles/{vehicle_id}/reset-state` | Ép hệ thống xoá cache lịch sử của 1 xe (dùng khi thay cảm biến, đổ xăng lớn, reset khẩn cấp). |
+### `POST /api/v1/clean`
 
----
+Endpoint tương thích cho request dùng tên trường `vehicle_id`, `timestamp`, `raw_fuel`, `speed`, `lat`, `lng`, `capacity_est`. Response vẫn dùng schema chuẩn ở trên.
 
-## 4. Hướng dẫn Triển khai bằng Docker
+### Quản trị
 
-Toàn bộ dịch vụ đã được đóng gói sẵn. Doanh nghiệp chỉ cần cài đặt `Docker` & `Docker Compose` trên Server Backend.
+| Method | Endpoint | Ý nghĩa |
+|---|---|---|
+| GET | `/api/v1/health` | Model, state store và trạng thái service |
+| POST | `/api/v1/vehicles/{vehicle_id}/reset-state` | Xóa state và lịch sử causal của một xe |
 
-**Bước 1:** Đặt toàn bộ source code vào một thư mục trên Server (Ví dụ: `/opt/vicomsat/fuel-api/`).
+## 3. Data dictionary
 
-**Bước 2:** Chạy lệnh build và khởi động ở chế độ ngầm (detached):
-```bash
-cd /opt/vicomsat/fuel-api/
-docker compose up -d
+### Input
+
+| Trường | Bắt buộc | Ý nghĩa |
+|---|---:|---|
+| `VehicleID` | Có | Định danh/biển số xe |
+| `FuelTime` | Có | Thời điểm đo; các điểm phải đến theo thứ tự thời gian |
+| `FuelLevel` | Có | Nhiên liệu thô đã quy đổi sang lít |
+| `Speed` | Không | Vận tốc GPS, mặc định 0 km/h |
+| `Lat`, `Lng` | Không | Tọa độ GPS; `(0,0)` được coi là thiếu |
+| `CapacityEst` | Không | Dung tích ước tính để scale ngưỡng; nếu thiếu sẽ suy ra tạm từ mức hợp lệ đầu tiên |
+
+### `SignalState`
+
+| Giá trị | Ý nghĩa tín hiệu |
+|---|---|
+| `INIT` | Điểm khởi tạo |
+| `STABLE_JITTER` | Dao động nhỏ quanh một mặt bằng |
+| `OSCILLATION_NOISE` | Nhiễu dao động/răng cưa |
+| `SLOSHING` | Sóng sánh do chuyển động |
+| `GRADUAL_CHANGE` | Thay đổi có xu hướng theo thời gian |
+| `UPWARD_SHIFT` | Dịch chuyển mặt bằng theo chiều tăng, chưa gắn nghĩa nghiệp vụ |
+| `DOWNWARD_SHIFT` | Dịch chuyển mặt bằng theo chiều giảm, chưa gắn nghĩa nghiệp vụ |
+| `SPIKE` | Xung nhiễu tức thời |
+| `UNCERTAIN` | Chưa đủ bằng chứng phân loại |
+
+### `QualityFlag`
+
+| Giá trị | Hành động của bộ lọc |
+|---|---|
+| `VALID` | Điểm hợp lệ/khởi tạo |
+| `SMOOTH_KALMAN` | Đã cập nhật qua Adaptive Kalman |
+| `ZERO_DROPOUT_HELD` | Raw bằng 0/không hợp lệ, giữ mức sạch trước |
+| `SPIKE_HELD` | Xung bị giữ lại |
+| `PENDING_UPWARD_SHIFT_HELD` | Chờ thêm bằng chứng cho mặt bằng tăng |
+| `UPWARD_SHIFT_TRACKED` | Đã bám mặt bằng tăng bền vững |
+| `UPWARD_REVERSAL_REJECTED` | Ứng viên tăng quay về nền nên bị loại |
+| `UPWARD_REVERSAL_RESET` | Mặt bằng tăng vừa bám bị đảo chiều |
+| `PENDING_DOWNWARD_SHIFT_HELD` | Chờ thêm bằng chứng cho mặt bằng giảm |
+| `DOWNWARD_SHIFT_TRACKED` | Đã bám mặt bằng giảm bền vững |
+| `STABLE_LEVEL_TRACKING` | Bám mặt bằng ổn định mới |
+
+### `MotionState`
+
+| Giá trị | Điều kiện |
+|---|---|
+| `MOVING` | Vận tốc và dịch chuyển GPS cùng xác nhận xe đang di chuyển |
+| `LOW_MOTION` | Vận tốc thấp và các điểm GPS nằm trong cụm nhỏ |
+| `UNCERTAIN` | Thiếu GPS, chưa đủ điểm hoặc GPS/vận tốc mâu thuẫn |
+
+`LOW_MOTION` không đồng nghĩa với đỗ hoặc tắt máy.
+
+## 4. State store
+
+Mặc định service dùng RAM:
+
+```env
+STATE_BACKEND=memory
+STATE_TTL_SECONDS=259200
 ```
 
-**Bước 3:** Kiểm tra log hoạt động:
-```bash
-docker compose logs -f
+Production có thể dùng Redis:
+
+```env
+STATE_BACKEND=redis
+REDIS_URL=redis://localhost:6379/0
+STATE_TTL_SECONDS=259200
 ```
 
-**Bước 4:** Gửi thử một Request:
-```bash
-curl -X GET http://localhost:8000/api/v1/health
+State được lưu dưới dạng JSON có `schema_version`. Nếu Redis tạm lỗi, tiến trình hiện tại tiếp tục bằng memory fallback và health check trả trạng thái `degraded`.
+
+Ngoài TTL lưu trữ, lõi lọc tự đặt lại Kalman khi khoảng cách giữa hai điểm vượt `reset_gap_minutes` (mặc định 120 phút).
+
+## 5. Kiểm tra chất lượng
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests -q -p no:cacheprovider
+.\.venv\Scripts\python.exe scripts\evaluate_smooth_tracking.py
 ```
 
-**Kịch bản Tích hợp vào VICOMSAT:**
-Tại Gateway nhận dữ liệu thiết bị GPS hiện tại (có thể viết bằng .NET, Java, Go...), thêm một logic:
-- Mỗi khi nhận bản tin Telemetry chứa Fuel Level, gọi sang REST API `POST /api/v1/fuel/clean-point`.
-- Nhận kết quả `clean_fuel_liters`, sau đó mới lưu kết quả đã làm sạch xuống Database để cho Dashboard và Mobile App hiển thị cho Khách hàng.
+Báo cáo KPI được ghi vào `artifacts/evaluation/`. Các golden segment có trạng thái `pending_domain_review` chỉ là baseline kỹ thuật; cần người phụ trách dữ liệu duyệt trước khi coi là chuẩn nghiệp vụ.
+
+## 6. Docker và dashboard
+
+```powershell
+docker compose up --build -d
+docker compose ps
+```
+
+- API: `http://localhost:8000`, health: `/api/v1/health`.
+- Dashboard chạy local, không được đóng vào Docker image; chỉ vẽ `RawFuel` và `CleanFuel` màu tím.
+- Dashboard hiển thị `SignalState`, `QualityFlag`, `MotionState` trong tooltip và bảng chi tiết.
+
+Để chạy dashboard local: `pip install -r requirements-dashboard.txt`, sau đó
+`streamlit run src/dashboard/app_dashboard_tienxuly.py`.
+
+Nếu chạy Redis trong Compose, đặt `STATE_BACKEND=redis`, `REDIS_URL=redis://redis:6379/0` và dùng `docker compose --profile redis up --build -d`.

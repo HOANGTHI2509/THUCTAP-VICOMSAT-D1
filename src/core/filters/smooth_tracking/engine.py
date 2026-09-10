@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 
 from .config import SmoothTrackingConfig
+from .contracts import normalize_quality_flag, normalize_signal_state
 from .features import CausalFeatureExtractor
 from .kalman import smooth_kalman_update
 from .state import MotionEvidence, VehicleFilterContext
@@ -112,8 +113,9 @@ class AISmoothTrackingFilter:
             "clean_fuel": round(clean_fuel, 2),
             "fuel_rate": round(fuel_rate, 4),
             "is_stopped": 1 if speed <= self.config.stopped_speed_kmh else 0,
-            "ai_state": ai_state,
-            "quality_flag": quality_flag,
+            "ai_state": normalize_signal_state(ai_state),
+            "signal_state": normalize_signal_state(ai_state),
+            "quality_flag": normalize_quality_flag(quality_flag),
             "motion_state": motion.state,
             "motion_confidence": round(motion.confidence, 3),
             "gps_displacement_meters": round(motion.gps_displacement_meters, 2),
@@ -228,8 +230,8 @@ class AISmoothTrackingFilter:
             ctx.kalman_x = raw_val
             ctx.kalman_p = 1.0
             ctx.last_clean_fuel = raw_val
-            ctx.recent_refuel_steps = 0
-            ctx.pending_drain_count = 0
+            ctx.recent_upward_steps = 0
+            ctx.pending_downward_count = 0
             ctx.history_fuel.clear()
             ctx.history_time.clear()
             ctx.history_speed.clear()
@@ -240,14 +242,14 @@ class AISmoothTrackingFilter:
             ctx.capacity_est = float(raw_val * self.config.capacity_headroom)
 
         # 5. Xac dinh trang thai AI
-        ai_state = self._resolve_ai_state(
+        ai_state = normalize_signal_state(self._resolve_ai_state(
             ctx=ctx,
             raw_fuel=raw_val,
             speed=speed,
             dt_minutes=dt_minutes,
             known_ai_state=known_ai_state,
             motion=motion,
-        )
+        ))
 
         # 6. Kiem tra va loai bo loi cam bien: NaN, rot ve 0, Spike xung
         if math.isnan(raw_val) or raw_val <= 0.0 or ai_state in ("SPIKE", "IMPULSE_NOISE"):
@@ -271,14 +273,14 @@ class AISmoothTrackingFilter:
 
         # 7. LOI THUAT TOAN THICH NGHI 2 CHE DO (BAM SAT & LAM MUOT)
         delta_from_clean = raw_val - ctx.last_clean_fuel
-        refuel_threshold = max(
+        level_shift_threshold = max(
             self.config.level_shift_floor,
             self.config.level_shift_capacity_ratio * ctx.capacity_est,
         )
 
-        # Giam thoi gian bao ve sau nap
-        if ctx.recent_refuel_steps > 0:
-            ctx.recent_refuel_steps -= 1
+        # Giam thoi gian bao ve sau mot dich chuyen mat bang tang.
+        if ctx.recent_upward_steps > 0:
+            ctx.recent_upward_steps -= 1
 
         quality_flag = "VALID"
 
@@ -296,88 +298,88 @@ class AISmoothTrackingFilter:
             <= ctx.last_clean_fuel - max(0.8, jitter * 0.5)
         )
 
-        # --- A. PHAT HIEN NAP NHIEN LIEU (Plateau & Reversal Guard - Triet tieu 100% Doi Ao) ---
-        is_refuel = False
+        # --- A. XAC NHAN DICH CHUYEN MAT BANG TANG (causal plateau/reversal guard) ---
+        is_upward_shift = False
         plateau_tol = max(3.0, 0.006 * ctx.capacity_est)
 
-        # 1. Kiem tra ung vien nap dang cho xac nhan (Candidate Tracking)
-        if ctx.refuel_anchor is not None:
+        # 1. Theo doi ung vien dich chuyen tang dang cho xac nhan.
+        if ctx.upward_anchor is not None:
             # Neu tut ve gan anchor cu -> DAO CHIEU (Reversal): Huy bo ngay lap tuc!
-            if raw_val <= ctx.refuel_anchor + refuel_threshold * 0.4:
-                ctx.refuel_anchor = None
-                ctx.refuel_samples.clear()
+            if raw_val <= ctx.upward_anchor + level_shift_threshold * 0.4:
+                ctx.upward_anchor = None
+                ctx.upward_samples.clear()
                 ctx.rise_count = 0
-                quality_flag = "REVERSAL_REJECTED"
+                quality_flag = "UPWARD_REVERSAL_REJECTED"
             else:
-                ctx.refuel_samples.append(raw_val)
-                spread = max(ctx.refuel_samples) - min(ctx.refuel_samples)
+                ctx.upward_samples.append(raw_val)
+                spread = max(ctx.upward_samples) - min(ctx.upward_samples)
                 # Tăng tiến liên tục (Ramp >= 3 nhịp) HOẶC tạo mặt bằng ổn định trên cao (Plateau >= 3 nhịp)
-                is_advancing = (len(ctx.refuel_samples) >= 3 and 
-                                all(ctx.refuel_samples[k] >= ctx.refuel_samples[k-1] - 1.5 for k in range(1, len(ctx.refuel_samples))))
-                is_stable_plateau = (len(ctx.refuel_samples) >= 3 and spread <= plateau_tol * 1.5)
+                is_advancing = (len(ctx.upward_samples) >= 3 and
+                                all(ctx.upward_samples[k] >= ctx.upward_samples[k-1] - 1.5 for k in range(1, len(ctx.upward_samples))))
+                is_stable_plateau = (len(ctx.upward_samples) >= 3 and spread <= plateau_tol * 1.5)
                 # Hoặc có AI xác nhận rõ ràng UPWARD_SHIFT / RISING từ nhịp 2
-                ai_supported = (len(ctx.refuel_samples) >= 2 and ai_state in ("UPWARD_SHIFT", "RISING"))
+                ai_supported = (len(ctx.upward_samples) >= 2 and ai_state == "UPWARD_SHIFT")
 
                 if is_advancing or is_stable_plateau or ai_supported:
-                    is_refuel = True
-                    ctx.refuel_anchor = None
-                    ctx.refuel_samples.clear()
+                    is_upward_shift = True
+                    ctx.upward_anchor = None
+                    ctx.upward_samples.clear()
                 else:
                     clean_fuel = ctx.last_clean_fuel
-                    quality_flag = "PENDING_REFUEL_HELD"
-        elif delta_from_clean >= refuel_threshold:
-            if ctx.recent_refuel_steps > 0:
-                is_refuel = True
+                    quality_flag = "PENDING_UPWARD_SHIFT_HELD"
+        elif delta_from_clean >= level_shift_threshold:
+            if ctx.recent_upward_steps > 0:
+                is_upward_shift = True
             else:
-                ctx.refuel_anchor = ctx.last_clean_fuel
-                ctx.refuel_samples = [raw_val]
+                ctx.upward_anchor = ctx.last_clean_fuel
+                ctx.upward_samples = [raw_val]
                 clean_fuel = ctx.last_clean_fuel
-                quality_flag = "PENDING_REFUEL_HELD"
-        elif ctx.recent_refuel_steps > 0 and delta_from_clean >= 1.0:
-            is_refuel = True
+                quality_flag = "PENDING_UPWARD_SHIFT_HELD"
+        elif ctx.recent_upward_steps > 0 and delta_from_clean >= 1.0:
+            is_upward_shift = True
         else:
-            ctx.refuel_anchor = None
-            ctx.refuel_samples.clear()
+            ctx.upward_anchor = None
+            ctx.upward_samples.clear()
             ctx.rise_count = 0
 
-        if is_refuel:
+        if is_upward_shift:
             ctx.rise_count = 0
-            ctx.refuel_anchor = None
-            ctx.refuel_samples.clear()
+            ctx.upward_anchor = None
+            ctx.upward_samples.clear()
             clean_fuel = raw_val
             ctx.kalman_x = raw_val
             ctx.kalman_p = 4.0
-            ctx.recent_refuel_steps = self.config.upward_hold_steps
-            ctx.pending_drain_count = 0
+            ctx.recent_upward_steps = self.config.upward_hold_steps
+            ctx.pending_downward_count = 0
             ctx.drop_count = 0
-            quality_flag = "REFUEL_TRACKED"
+            quality_flag = "UPWARD_SHIFT_TRACKED"
 
-        # Neu dang trong cua so bao ve sau nap ma muc do tut sau ve lai gan muc cu -> DAO CHIEU HOAN TAC:
-        elif ctx.recent_refuel_steps > 0 and delta_from_clean <= -refuel_threshold * 0.5:
-            ctx.recent_refuel_steps = 0
+        # Neu dang bao ve sau dich chuyen tang ma raw quay lai gan muc cu: hoan tac.
+        elif ctx.recent_upward_steps > 0 and delta_from_clean <= -level_shift_threshold * 0.5:
+            ctx.recent_upward_steps = 0
             ctx.kalman_x = raw_val
             clean_fuel = raw_val
-            quality_flag = "REFUEL_REVERSAL_RESET"
+            quality_flag = "UPWARD_REVERSAL_RESET"
 
-        # --- B. PHAT HIEN RUT TROM NHIEN LIEU (Drain Detection - Xac nhan 3 nhip) ---
-        elif delta_from_clean <= -refuel_threshold and quality_flag != "PENDING_REFUEL_HELD":
-            ctx.pending_drain_count += 1
-            if ctx.pending_drain_count >= self.config.downward_confirm_points:
-                # Xac nhan rut trom that sau 3 nhip lien tiep duy tri muc thap
+        # --- B. XAC NHAN DICH CHUYEN MAT BANG GIAM (3 nhip causal) ---
+        elif delta_from_clean <= -level_shift_threshold and quality_flag != "PENDING_UPWARD_SHIFT_HELD":
+            ctx.pending_downward_count += 1
+            if ctx.pending_downward_count >= self.config.downward_confirm_points:
+                # Xac nhan mat bang thap moi sau 3 nhip lien tiep.
                 clean_fuel = raw_val
                 ctx.kalman_x = raw_val
                 ctx.kalman_p = 4.0
-                ctx.pending_drain_count = 0
+                ctx.pending_downward_count = 0
                 ctx.drop_count = 0
-                quality_flag = "DRAIN_CONFIRMED"
+                quality_flag = "DOWNWARD_SHIFT_TRACKED"
             else:
                 clean_fuel = ctx.last_clean_fuel
-                quality_flag = "PENDING_DRAIN_HELD"
+                quality_flag = "PENDING_DOWNWARD_SHIFT_HELD"
 
         # Muc thap khong du nguong su kien lon van duoc chap nhan khi bon
         # phep do lien tiep tao thanh mot mat bang hep. Day la thay doi muc
-        # cua tin hieu, khong gan nghia nap/rut cho su kien.
-        elif stable_lower_level and quality_flag != "PENDING_REFUEL_HELD":
+        # cua tin hieu, khong gan y nghia nghiep vu cho thay doi nay.
+        elif stable_lower_level and quality_flag != "PENDING_UPWARD_SHIFT_HELD":
             stable_target = float(statistics.median(recent_four))
             stable_step = self.config.stable_level_gain * (stable_target - ctx.kalman_x)
             stable_step_limit = max(4.0, jitter * 3.0)
@@ -385,13 +387,13 @@ class AISmoothTrackingFilter:
             clean_fuel = ctx.kalman_x + stable_step
             ctx.kalman_x = clean_fuel
             ctx.kalman_p = 2.0
-            ctx.pending_drain_count = 0
+            ctx.pending_downward_count = 0
             ctx.drop_count = 0
             quality_flag = "STABLE_LEVEL_TRACKING"
 
         # --- C. CHE DO LAM MUOT DOI XUNG & BAM DOC TIEU HAO (TREND-ADAPTIVE) ---
-        elif quality_flag != "PENDING_REFUEL_HELD":
-            ctx.pending_drain_count = 0
+        elif quality_flag != "PENDING_UPWARD_SHIFT_HELD":
+            ctx.pending_downward_count = 0
             clean_fuel = smooth_kalman_update(
                 context=ctx,
                 raw_fuel=raw_val,

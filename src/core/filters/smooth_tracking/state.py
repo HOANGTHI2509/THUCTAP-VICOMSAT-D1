@@ -17,12 +17,12 @@ class VehicleFilterContext:
     last_clean_fuel: Optional[float] = None
     last_raw_fuel: Optional[float] = None
     last_time: Optional[datetime] = None
-    recent_refuel_steps: int = 0
-    pending_drain_count: int = 0
+    recent_upward_steps: int = 0
+    pending_downward_count: int = 0
     drop_count: int = 0
     rise_count: int = 0
-    refuel_anchor: Optional[float] = None
-    refuel_samples: List[float] = field(default_factory=list)
+    upward_anchor: Optional[float] = None
+    upward_samples: List[float] = field(default_factory=list)
     history_fuel: deque = field(default_factory=lambda: deque(maxlen=12))
     history_time: deque = field(default_factory=lambda: deque(maxlen=12))
     history_speed: deque = field(default_factory=lambda: deque(maxlen=12))

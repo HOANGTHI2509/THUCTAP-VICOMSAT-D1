@@ -240,7 +240,10 @@ class VehicleQueueManager:
             capacity_est=capacity_est,
         )
         clean_fuel = float(result["clean_fuel_liters"])
-        ai_state = result["ai_signal_state"]
+        signal_state = result.get("signal_state") or result.get(
+            "ai_signal_state", "UNCERTAIN"
+        )
+        quality_flag = result.get("quality_flag", "VALID")
 
         point_payload = {
             "time": time_str,
@@ -261,8 +264,10 @@ class VehicleQueueManager:
             "lng": lng,
             "address": address,
             "vehicle_id": vehicle_id,
-            "state": ai_state,
-            "ai_state": ai_state,
+            "state": signal_state,
+            "signal_state": signal_state,
+            "ai_state": signal_state,
+            "quality_flag": quality_flag,
         }
 
         with self._lock:
@@ -276,7 +281,7 @@ class VehicleQueueManager:
                 stats["current_fuel_clean"] = round(clean_fuel, 2)
                 stats["current_fuel_smooth"] = round(clean_fuel, 2)
                 stats["current_speed"] = round(speed, 1)
-                stats["current_state"] = ai_state
+                stats["current_state"] = signal_state
                 stats["current_motion_state"] = result.get("motion_state", "UNCERTAIN")
                 stats["current_lat"] = lat
                 stats["current_lng"] = lng
@@ -286,7 +291,9 @@ class VehicleQueueManager:
         return {
             "clean_fuel": round(clean_fuel, 2),
             "raw_fuel": round(raw_fuel, 2),
-            "ai_state": ai_state,
+            "signal_state": signal_state,
+            "ai_state": signal_state,
+            "quality_flag": quality_flag,
         }
 
     def get_vehicle_data(
