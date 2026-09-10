@@ -60,7 +60,7 @@ flowchart LR
 2. **Tầng chuẩn hóa (Sanitization & Validation)**: Kiểm tra định dạng thời gian ISO-8601, loại bỏ tọa độ GPS không hợp lệ (như `0, 0`), phát hiện giá trị âm, rớt về 0 hoặc vượt trần dung tích bình (`CapacityEst`).
 3. **Tầng xác định vận động (Motion Assessment)**: Kết hợp vận tốc tức thời và bán kính dịch chuyển GPS trong cửa sổ trượt 5 điểm gần nhất để gán nhãn trạng thái vận động (`MOVING`, `LOW_MOTION`, `UNCERTAIN`).
 4. **Tầng trích xuất đặc trưng (Causal Feature Extraction)**: Tính toán độ biến thiên, độ lệch chuẩn trượt, hướng dốc và điểm phân kỳ chỉ từ dữ liệu quá khứ.
-5. **Tầng phân loại tín hiệu AI (AI Signal State Classifier)**: Mô hình Random Forest sử dụng vector đặc trưng để phân loại dạng tín hiệu thành 8 nhãn kỹ thuật.
+5. **Tầng phân loại tín hiệu AI (AI Signal State Classifier)**: Mô hình Random Forest sử dụng vector đặc trưng để phân loại dạng tín hiệu thành 5 lớp động học cốt lõi (`STABLE_JITTER`, `GRADUAL_CHANGE`, `OSCILLATION_NOISE`, `UPWARD_SHIFT`, `DOWNWARD_SHIFT`), kết hợp 3 cờ quy tắc vật lý thời gian thực (`SPIKE`, `SLOSHING`, `UNCERTAIN`).
 6. **Tầng lọc thích ứng Smooth-Tracking (Adaptive Kalman Core)**: Điều chỉnh động hiệp phương sai nhiễu đo $R$ và nhiễu hệ thống $Q$ dựa trên kết hợp giữa `SignalState`, `MotionState` và dung tích xe.
 7. **Tầng quản lý trạng thái xe (Vehicle State Store)**: Đóng gói và lưu vết State Context của xe (Kalman state, lịch sử đệm, bộ đếm xác nhận) vào RAM hoặc Redis (có khóa an toàn chống Race Condition).
 8. **Tầng xuất dữ liệu (Contract Delivery)**: Trả về kết quả JSON đồng nhất bao gồm giá trị sạch, cờ chất lượng và độ trễ tính toán (Latency).
@@ -182,18 +182,29 @@ Hệ thống xử lý từng điểm đo độc lập theo luồng JSON gửi l�
 
 ## 6. Phân tích và gắn nhãn dữ liệu (AI Data Labeling)
 
-### 6.1. Danh sách 8 nhãn trạng thái tín hiệu (`SignalState`)
+### 6.1. Danh mục nhãn trạng thái tín hiệu (`SignalState`)
 
-| Tên nhãn | Định nghĩa kỹ thuật | Hiện tượng vật lý thực tế |
+Hệ thống kết hợp giữa **mô hình AI 5 lớp** và **tầng lọc quy tắc vật lý 3 cờ** để hình thành 8 trạng thái tín hiệu đầu ra:
+
+#### 6.1.1. 5 lớp trạng thái do mô hình AI huấn luyện & phân loại (Trùng khớp 100% Ma trận nhầm lẫn 5x5)
+Mô hình Machine Learning (Random Forest) được huấn luyện trực tiếp trên 5 lớp hình học động học:
+
+| Tên nhãn AI | Định nghĩa kỹ thuật | Hiện tượng vật lý thực tế |
 | :--- | :--- | :--- |
-| `STABLE_JITTER` | Dao động biên độ nhỏ quanh mức trung bình tĩnh ($\le 0.8\text{ L}$). | Xe dừng nổ máy, hoặc cảm biến rung cơ học khi đỗ. |
-| `OSCILLATION_NOISE` | Dao động nhiễu tần số cao, đổi hướng liên tục không có xu thế. | Xe đi qua ổ gà, gờ giảm tốc liên tục. |
-| `SLOSHING` | Sóng sánh nhiên liệu chu kỳ 10–30s, độ lệch lớn nhưng đối xứng. | Nhiên liệu dồn về trước/sau khi phanh hoặc tăng tốc. |
-| `GRADUAL_CHANGE` | Mức nhiên liệu giảm hoặc tăng từ từ và đều đặn theo thời gian. | Tiêu hao nhiên liệu bình thường khi động cơ hoạt động. |
-| `UPWARD_SHIFT` | Mặt bằng tín hiệu dịch chuyển tăng đột ngột và duy trì mức mới. | Mức đo tăng bền vững (có thể do nạp hoặc phao kẹt). |
-| `DOWNWARD_SHIFT` | Mặt bằng tín hiệu dịch chuyển giảm đột ngột và duy trì mức mới. | Mức đo sụt bền vững (có thể do rút dầu hoặc trượt phao). |
-| `SPIKE` | 1–2 điểm đo nhảy vọt hoặc sụt nhọn bất thường rồi về nền cũ. | Nhiễu xung điện từ, chạm mass dây dẫn cảm biến. |
-| `UNCERTAIN` | Tín hiệu chưa đủ số điểm quan sát hoặc dữ liệu mâu thuẫn. | Trạng thái chuyển tiếp khi vừa khởi động hoặc mất GPS. |
+| `STABLE_JITTER` | Dao động biên độ nhỏ quanh mức trung bình tĩnh (<= 0.8 L). | Xe dừng nổ máy, hoặc cảm biến rung cơ học khi đỗ. |
+| `GRADUAL_CHANGE` | Mức nhiên liệu giảm từ từ và đều đặn theo thời gian. | Tiêu hao nhiên liệu bình thường khi động cơ hoạt động. |
+| `OSCILLATION_NOISE` | Dao động nhiễu tần số cao, đổi hướng liên tục. | Xe đi qua ổ gà, gờ giảm tốc, đường gồ ghề. |
+| `UPWARD_SHIFT` | Mặt bằng tín hiệu dịch chuyển tăng đột ngột và duy trì mức mới. | Mức đo tăng bền vững (bước nhảy mức dương). |
+| `DOWNWARD_SHIFT` | Mặt bằng tín hiệu dịch chuyển giảm đột ngột và duy trì mức mới. | Mức đo sụt bền vững (bước nhảy mức âm). |
+
+#### 6.1.2. 3 trạng thái mở rộng nhận diện bằng tầng quy tắc vật lý thời gian thực (Rule-based Guards)
+Các trạng thái này được bộ điều phối nhận diện trực tiếp để tăng tính chính xác tuyệt đối:
+
+| Tên nhãn quy tắc | Định nghĩa kỹ thuật | Hiện tượng vật lý thực tế |
+| :--- | :--- | :--- |
+| `SPIKE` | 1–2 điểm đo nhảy vọt hoặc sụt nhọn bất thường rồi hồi về nền cũ ngay. | Nhiễu xung điện từ, chạm mass dây dẫn cảm biến. |
+| `SLOSHING` | Sóng sánh nhiên liệu chu kỳ 10–30s, đối xứng hai chiều (directionality < 0.35). | Nhiên liệu va đập dồn bình khi phanh hoặc tăng tốc. |
+| `UNCERTAIN` | Tín hiệu chưa đủ số điểm quan sát (vừa khởi tạo) hoặc GPS và vận tốc mâu thuẫn. | Trạng thái chuyển tiếp dữ liệu ban đầu hoặc mất GPS. |
 
 > **CẢNH BÁO QUAN TRỌNG VỀ RANH GIỚI NGHIỆP VỤ**:  
 > Nhãn `UPWARD_SHIFT` tuyệt đối không đồng nghĩa với "Sự kiện nạp dầu". Tương tự, `DOWNWARD_SHIFT` không đồng nghĩa với "Sự kiện trộm dầu". Đây chỉ là nhãn mô tả **hình học biến đổi của tín hiệu**. Tầng ứng dụng Đề tài 2 sẽ kết hợp thêm thời gian dừng, vận tốc trung bình và trạng thái bật máy để ra quyết định kinh doanh.
@@ -246,10 +257,29 @@ Mô hình AI sử dụng vector 15 đặc trưng kỹ thuật, được trích x
 ## 8. Mô hình AI phân loại tín hiệu (AI Model Specifications)
 
 - **Kiến trúc mô hình**: **Random Forest Classifier** (Scikit-Learn).
+- **Số lớp phân loại**: **5 lớp động học cốt lõi** (`UPWARD_SHIFT`, `DOWNWARD_SHIFT`, `GRADUAL_CHANGE`, `STABLE_JITTER`, `OSCILLATION_NOISE`).
 - **Lý do lựa chọn**:
   1. Độ trễ suy luận (Inference Latency) cực thấp: **< 1.5 ms/điểm**, hoàn toàn không đòi hỏi GPU.
   2. Khả năng chống Overfitting tốt nhờ cơ chế ensemble nhiều cây quyết định độc lập.
   3. Hoạt động ổn định trên dữ liệu tabular và diễn giải được mức độ quan trọng của đặc trưng (Feature Importance).
+
+### 8.1. Kết quả kiểm định trên tập Test độc lập (23,483 mẫu kiểm thử Unseen)
+
+| Lớp tín hiệu (`SignalState`) | Precision | Recall | F1-Score | Số lượng mẫu (Support) |
+| :--- | :---: | :---: | :---: | :---: |
+| `UPWARD_SHIFT` (Bước nhảy tăng) | 0.89 | 0.98 | **0.93** | 64 |
+| `DOWNWARD_SHIFT` (Bước nhảy giảm) | 0.90 | 0.54 | **0.68** | 116 |
+| `GRADUAL_CHANGE` (Tiêu thụ dốc) | 0.96 | 0.90 | **0.93** | 1,526 |
+| `STABLE_JITTER` (Đỗ / Đứng yên) | 1.00 | 0.97 | **0.98** | 17,928 |
+| `OSCILLATION_NOISE` (Sóng sánh/Rung) | 0.83 | 0.97 | **0.89** | 3,849 |
+| **Toàn bộ hệ thống (Overall)** | — | — | **Accuracy: 96%** | **23,483** |
+
+### 8.2. Ma trận nhầm lẫn (Confusion Matrix 5x5)
+
+Ma trận nhầm lẫn đối sánh trên tập dữ liệu kiểm thử độc lập cho 5 lớp tín hiệu:
+
+![Ma trận nhầm lẫn 5 lớp](models/rf_signal_state_causal_v3/test_confusion_matrix.png)
+
 - **Quy cách đóng gói**:
   - File model: [models/rf_signal_state_causal_v3/fuel_state_classifier.pkl](file:///d:/THUCTAP_VICOMSAT/models/rf_signal_state_causal_v3/fuel_state_classifier.pkl).
   - File metadata: [models/rf_signal_state_causal_v3/metadata.json](file:///d:/THUCTAP_VICOMSAT/models/rf_signal_state_causal_v3/metadata.json) lưu danh sách thứ tự chính xác của các cột đặc trưng để chống trôi thứ tự khi unpickle.
