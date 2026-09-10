@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import math
 
+import numpy as np
 import pandas as pd
 
 from src.core.filters.smooth_tracking import AISmoothTrackingFilter
 from src.core.filters.smooth_tracking.dataframe import filter_smooth_tracking_dataframe
+from src.core.filters.smooth_tracking.state import VehicleFilterContext
 
 
 REQUIRED_COLUMNS = ("FuelTime", "FuelLevel")
@@ -64,6 +67,122 @@ def estimate_capacity_liters(frame: pd.DataFrame) -> float:
     return max(200.0, float(fuel.quantile(0.995)))
 
 
+def _predict_causal_states_batch(
+    frame: pd.DataFrame,
+    engine: AISmoothTrackingFilter,
+    vehicle_id: str,
+    capacity_est_liters: float,
+) -> pd.Series | None:
+    """Predict model states in one call while preserving causal features.
+
+    Model features depend on raw history, speed and GPS, but not on earlier
+    classifier outputs. Building them sequentially and predicting as one matrix
+    avoids thousands of expensive ``RandomForest.predict`` calls.
+    """
+    if engine.model is None or not engine.feature_columns or frame.empty:
+        return None
+
+    config = engine.config
+    extractor = engine.feature_extractor
+    context = VehicleFilterContext(
+        vehicle_id=vehicle_id,
+        capacity_est=(
+            capacity_est_liters
+            if capacity_est_liters > config.minimum_capacity
+            else config.default_capacity
+        ),
+    )
+    states = np.full(len(frame), "STABLE_JITTER", dtype=object)
+    feature_rows: list[list[float]] = []
+    feature_positions: list[int] = []
+
+    for position, row in enumerate(frame.itertuples(index=False)):
+        timestamp = engine._normalize_timestamp(getattr(row, "FuelTime"))
+        raw_fuel = engine._normalize_number(getattr(row, "FuelLevel"), np.nan)
+        speed = engine._normalize_number(getattr(row, "Speed", 0.0), 0.0)
+        latitude = getattr(row, "Lat", None)
+        longitude = getattr(row, "Lng", None)
+        coordinate = extractor._valid_coordinate(latitude, longitude)
+        motion = extractor.motion_evidence(context, speed, latitude, longitude)
+
+        if context.last_clean_fuel is None:
+            initial = (
+                config.initial_fuel_fallback
+                if math.isnan(raw_fuel) or raw_fuel <= 0.0
+                else raw_fuel
+            )
+            context.last_clean_fuel = initial
+            context.kalman_x = initial
+            context.kalman_p = 1.0
+            context.last_time = timestamp
+            context.last_raw_fuel = raw_fuel
+            context.history_fuel.append(initial)
+            context.history_time.append(timestamp)
+            context.history_speed.append(speed)
+            context.history_coordinates.append(coordinate)
+            states[position] = "INIT"
+            continue
+
+        dt_seconds = (
+            (timestamp - context.last_time).total_seconds()
+            if context.last_time is not None
+            else config.nominal_period_minutes * 60.0
+        )
+        if dt_seconds < 0.0:
+            dt_seconds = config.nominal_period_minutes * 60.0
+        dt_minutes = max(dt_seconds / 60.0, 0.1)
+
+        if (
+            dt_minutes > config.reset_gap_minutes
+            and not math.isnan(raw_fuel)
+            and raw_fuel > 0.0
+        ):
+            context.kalman_x = raw_fuel
+            context.kalman_p = 1.0
+            context.last_clean_fuel = raw_fuel
+            context.recent_upward_steps = 0
+            context.pending_downward_count = 0
+            context.history_fuel.clear()
+            context.history_time.clear()
+            context.history_speed.clear()
+            context.history_coordinates.clear()
+
+        if not math.isnan(raw_fuel) and raw_fuel > context.capacity_est:
+            context.capacity_est = raw_fuel * config.capacity_headroom
+
+        valid_measurement = not math.isnan(raw_fuel) and raw_fuel > 0.0
+        if valid_measurement:
+            features = extractor.model_features(
+                context,
+                raw_fuel,
+                speed,
+                dt_minutes,
+                motion,
+            )
+            vector = [features.get(column, 0.0) for column in engine.feature_columns]
+            if all(math.isfinite(float(value)) for value in vector):
+                feature_rows.append(vector)
+                feature_positions.append(position)
+
+        context.last_time = timestamp
+        context.history_time.append(timestamp)
+        context.history_speed.append(speed)
+        context.history_coordinates.append(coordinate)
+        if valid_measurement:
+            context.last_raw_fuel = raw_fuel
+            context.history_fuel.append(raw_fuel)
+
+    if feature_rows:
+        try:
+            predictions = engine.model.predict(np.asarray(feature_rows, dtype=float))
+            states[feature_positions] = predictions
+        except Exception:
+            # The realtime engine falls back to STABLE_JITTER on model errors.
+            pass
+
+    return pd.Series(states, index=frame.index, dtype="object")
+
+
 def run_topic1_filter(
     frame: pd.DataFrame,
     vehicle_id: str,
@@ -86,6 +205,14 @@ def run_topic1_filter(
         segment = segment.drop(
             columns=[column for column in ("AI_State",) if column in segment],
         )
+        predicted_states = _predict_causal_states_batch(
+            segment,
+            engine,
+            vehicle_id=f"{vehicle_id}:{segment_id}:features",
+            capacity_est_liters=capacity_est_liters,
+        )
+        if predicted_states is not None:
+            segment["AI_State"] = predicted_states
         filtered = filter_smooth_tracking_dataframe(
             segment,
             vehicle_id=f"{vehicle_id}:{segment_id}",

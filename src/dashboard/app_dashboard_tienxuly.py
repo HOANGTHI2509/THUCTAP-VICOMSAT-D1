@@ -24,6 +24,7 @@ from src.dashboard.dashboard_data import (  # noqa: E402
 
 DATA_DIRECTORY = Path(os.getenv("FUEL_DATA_DIRECTORY", PROJECT_ROOT / "TienXuLy"))
 MODEL_DIRECTORY = str(PROJECT_ROOT / "models" / "fuel_state_classifier")
+FILTER_PIPELINE_VERSION = "smooth-tracking-origin-dev-1cbc895"
 
 st.set_page_config(
     page_title="VICOMSAT Fuel Denoising",
@@ -45,7 +46,13 @@ def _load_source(file_path: str, modified_at_ns: int):
 
 
 @st.cache_data(show_spinner=False)
-def _filter_source(frame, vehicle_id: str, capacity_est_liters: float):
+def _filter_source(
+    frame,
+    vehicle_id: str,
+    capacity_est_liters: float,
+    pipeline_version: str,
+):
+    del pipeline_version
     return run_topic1_filter(
         frame,
         vehicle_id=vehicle_id,
@@ -100,7 +107,12 @@ with st.sidebar:
     st.caption("Muốn đổi Q/R phải cập nhật config và chạy golden/KPI, không chỉnh trên dashboard.")
 
 with st.spinner("Đang chạy Smooth-Tracking causal…"):
-    filtered = _filter_source(scope, vehicle_id, capacity_est_liters)
+    filtered = _filter_source(
+        scope,
+        vehicle_id,
+        capacity_est_liters,
+        FILTER_PIPELINE_VERSION,
+    )
 
 if isinstance(date_range, (tuple, list)) and len(date_range) == 2:
     start_date, end_date = date_range
@@ -134,60 +146,72 @@ fig = make_subplots(
     ),
     row_heights=[0.62, 0.19, 0.19],
 )
-fig.add_trace(
-    go.Scatter(
-        x=visible["FuelTime"],
-        y=visible["FuelLevel"],
-        mode="lines+markers",
-        name="RawFuel",
-        line={"color": "#EF553B", "width": 1.2},
-        marker={"size": 3},
-    ),
-    row=1,
-    col=1,
-)
-fig.add_trace(
-    go.Scatter(
-        x=visible["FuelTime"],
-        y=visible["CleanFuel"],
-        mode="lines",
-        name="CleanFuel (tím)",
-        line={"color": "#AB63FA", "width": 2.8},
-        customdata=visible[["SignalState", "QualityFlag", "MotionState"]],
-        hovertemplate=(
-            "%{x}<br>CleanFuel: %{y:.2f} L<br>SignalState: %{customdata[0]}"
-            "<br>QualityFlag: %{customdata[1]}<br>MotionState: %{customdata[2]}<extra></extra>"
+for segment_number, (_, plot_segment) in enumerate(
+    visible.groupby("SegmentID", sort=False, dropna=False)
+):
+    show_legend = segment_number == 0
+    fig.add_trace(
+        go.Scatter(
+            x=plot_segment["FuelTime"],
+            y=plot_segment["FuelLevel"],
+            mode="lines+markers",
+            name="RawFuel",
+            legendgroup="raw-fuel",
+            showlegend=show_legend,
+            line={"color": "#EF553B", "width": 1.2},
+            marker={"size": 3},
         ),
-    ),
-    row=1,
-    col=1,
-)
-fig.add_trace(
-    go.Scatter(
-        x=visible["FuelTime"],
-        y=visible["Speed"],
-        mode="lines",
-        name="Speed (km/h)",
-        line={"color": "#636EFA", "width": 1.5},
-        fill="tozeroy",
-        fillcolor="rgba(99, 110, 250, 0.12)",
-    ),
-    row=2,
-    col=1,
-)
-fig.add_trace(
-    go.Scatter(
-        x=visible["FuelTime"],
-        y=visible["RollingStd"],
-        mode="lines",
-        name="Rolling Std (L)",
-        line={"color": "#EF553B", "width": 1.5},
-        fill="tozeroy",
-        fillcolor="rgba(239, 85, 59, 0.12)",
-    ),
-    row=3,
-    col=1,
-)
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=plot_segment["FuelTime"],
+            y=plot_segment["CleanFuel"],
+            mode="lines",
+            name="CleanFuel (tím)",
+            legendgroup="clean-fuel",
+            showlegend=show_legend,
+            line={"color": "#AB63FA", "width": 2.8},
+            customdata=plot_segment[["SignalState", "QualityFlag", "MotionState"]],
+            hovertemplate=(
+                "%{x}<br>CleanFuel: %{y:.2f} L<br>SignalState: %{customdata[0]}"
+                "<br>QualityFlag: %{customdata[1]}<br>MotionState: %{customdata[2]}<extra></extra>"
+            ),
+        ),
+        row=1,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=plot_segment["FuelTime"],
+            y=plot_segment["Speed"],
+            mode="lines",
+            name="Speed (km/h)",
+            legendgroup="speed",
+            showlegend=show_legend,
+            line={"color": "#636EFA", "width": 1.5},
+            fill="tozeroy",
+            fillcolor="rgba(99, 110, 250, 0.12)",
+        ),
+        row=2,
+        col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=plot_segment["FuelTime"],
+            y=plot_segment["RollingStd"],
+            mode="lines",
+            name="Rolling Std (L)",
+            legendgroup="rolling-std",
+            showlegend=show_legend,
+            line={"color": "#EF553B", "width": 1.5},
+            fill="tozeroy",
+            fillcolor="rgba(239, 85, 59, 0.12)",
+        ),
+        row=3,
+        col=1,
+    )
 fig.update_layout(
     height=860,
     template="plotly_white",
