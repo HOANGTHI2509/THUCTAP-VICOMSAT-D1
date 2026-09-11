@@ -6,6 +6,8 @@ existing dashboard, tests and integrations backward compatible.
 
 from src.core.filters.smooth_tracking import (
     AISmoothTrackingFilter,
+    OPERATIONAL_STATES,
+    OperationalGuard,
     SmoothTrackingConfig,
     TrendEvidence,
     VehicleFilterContext,
@@ -16,6 +18,8 @@ from src.core.filters.smooth_tracking import (
 
 __all__ = [
     "AISmoothTrackingFilter",
+    "OperationalGuard",
+    "OPERATIONAL_STATES",
     "SmoothTrackingConfig",
     "TrendEvidence",
     "VehicleFilterContext",

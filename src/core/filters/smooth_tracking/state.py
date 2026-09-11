@@ -3,7 +3,7 @@
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -11,12 +11,43 @@ class VehicleFilterContext:
     """Bo nho rieng cua mot xe, khong chia se voi xe khac."""
 
     vehicle_id: str
-    capacity_est: float = 200.0
+    capacity_est: float = 0.0
+    capacity_known: bool = False
+    capacity_mode: str = "UNKNOWN_CAPACITY_MODE"
     kalman_x: Optional[float] = None
     kalman_p: float = 1.0
     last_clean_fuel: Optional[float] = None
     last_raw_fuel: Optional[float] = None
     last_time: Optional[datetime] = None
+    segment_id: Optional[str] = None
+    operational_state: str = "STABLE"
+    stable_baseline: Optional[float] = None
+    excursion_baseline: Optional[float] = None
+    excursion_min: Optional[float] = None
+    excursion_max: Optional[float] = None
+    pending_direction: int = 0
+    pending_samples: int = 0
+    pending_elapsed_min: float = 0.0
+    pending_stable_samples: int = 0
+    max_deviation_pct: float = 0.0
+    rebound_ratio: float = 0.0
+    pullback_ratio: float = 0.0
+    recovery_direction: int = 0
+    recovery_samples_left: int = 0
+    confirmed_direction: int = 0
+    confirmed_samples_left: int = 0
+    reacquisition_step: int = 0
+    last_kalman_q: float = 0.0
+    last_kalman_r: float = 0.0
+    last_expected_rate: float = 0.0
+    last_observed_rate: float = 0.0
+    last_rate_residual: float = 0.0
+    classifier_probability: float = 0.0
+    robust_noise: float = 0.1
+    innovation_gated: bool = False
+    shadow_fuel: Optional[float] = None
+    shadow_values: deque = field(default_factory=lambda: deque(maxlen=5))
+    confirmed_ramp_step: int = 0
     recent_upward_steps: int = 0
     pending_downward_count: int = 0
     drop_count: int = 0

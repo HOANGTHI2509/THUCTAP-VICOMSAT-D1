@@ -55,7 +55,7 @@ def _load_source(file_path: str, modified_at_ns: int):
 def _filter_source(
     frame,
     vehicle_id: str,
-    capacity_est_liters: float,
+    capacity_est_liters: float | None,
     pipeline_version: str,
 ):
     del pipeline_version
@@ -112,7 +112,7 @@ capacity_est_liters = estimate_capacity_liters(scope, vehicle_id=vehicle_id)
 with st.sidebar:
     st.markdown("---")
     st.caption(
-        f"Capacity: {capacity_est_liters:.1f} L. "
+        (f"Capacity: {capacity_est_liters:.1f} L. " if capacity_est_liters is not None else "Capacity: UNKNOWN_CAPACITY_MODE. ") +
         "Q/R dùng cấu hình versioned của Smooth-Tracking."
     )
     st.caption("Muốn đổi Q/R phải cập nhật config và chạy golden/KPI, không chỉnh trên dashboard.")

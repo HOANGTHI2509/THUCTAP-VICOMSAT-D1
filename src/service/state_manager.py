@@ -169,7 +169,7 @@ class StreamingStateManager:
         noise_sigma_liters: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Loc mot diem da quy doi sang lit bang Smooth-Tracking causal."""
-        del distance_meters, segment_id, noise_sigma_liters
+        del distance_meters, noise_sigma_liters
         started = time.perf_counter()
         vehicle_lock = self._get_vehicle_lock(vehicle_id)
         with vehicle_lock:
@@ -191,6 +191,7 @@ class StreamingStateManager:
                 capacity_est=capacity_est,
                 lat=lat,
                 lng=lng,
+                segment_id=segment_id,
             )
             with self._registry_lock:
                 stats = self._stats.setdefault(vehicle_id, {"total_points": 0})
@@ -216,4 +217,7 @@ class StreamingStateManager:
             "motion_state": result["motion_state"],
             "motion_confidence": result["motion_confidence"],
             "gps_displacement_meters": result["gps_displacement_meters"],
+            "capacity_mode": result["CapacityMode"],
+            "capacity_estimate": result["CapacityEstimate"],
+            "operational_state": result["OperationalState"],
         }

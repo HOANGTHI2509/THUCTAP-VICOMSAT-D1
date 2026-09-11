@@ -1,37 +1,32 @@
-"""Bo loc causal AI Smooth-Tracking cho tang tien xu ly nhien lieu.
+"""Causal purple fuel filter: classifier evidence -> OperationalGuard -> Kalman."""
 
-Module chi tra muc nhien lieu sach va trang thai chat luong tin hieu. Y nghia
-nghiep vu nhu nap nhien lieu hay rut trom thuoc tang phan tich phia sau.
-"""
 from __future__ import annotations
 
 import json
 import math
 import os
 import pickle
-import statistics
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
 from .config import SmoothTrackingConfig
+from .capacity import capacity_for_vehicle
 from .contracts import normalize_quality_flag, normalize_signal_state
 from .features import CausalFeatureExtractor
-from .kalman import smooth_kalman_update
+from .kalman import adaptive_kalman_update
+from .operational_guard import OperationalGuard
 from .state import MotionEvidence, VehicleFilterContext
 
 
 class AISmoothTrackingFilter:
-    """Dieu phoi tracking, adaptive Kalman va state causal cua tung xe."""
+    """Keep independent causal filter and guard state for every vehicle."""
 
-    def __init__(
-        self,
-        model_dir: str = "models/fuel_state_classifier",
-        config: Optional[SmoothTrackingConfig] = None,
-    ):
+    def __init__(self, model_dir: str = "models/fuel_state_classifier", config: Optional[SmoothTrackingConfig] = None):
         self.config = config or SmoothTrackingConfig()
         self.feature_extractor = CausalFeatureExtractor(self.config)
+        self.guard = OperationalGuard(self.config)
         self.model = None
         self.metadata = None
         self.feature_columns: List[str] = []
@@ -45,47 +40,35 @@ class AISmoothTrackingFilter:
         meta_path = os.path.join(model_dir, "metadata.json")
         if os.path.exists(model_path) and os.path.exists(meta_path):
             try:
-                with open(meta_path, "r", encoding="utf-8") as f:
-                    self.metadata = json.load(f)
-                with open(model_path, "rb") as f:
-                    self.model = pickle.load(f)
+                with open(meta_path, "r", encoding="utf-8") as stream:
+                    self.metadata = json.load(stream)
+                with open(model_path, "rb") as stream:
+                    self.model = pickle.load(stream)
                 self.feature_columns = self.metadata.get("feature_columns", [])
             except Exception:
                 self.model = None
                 self.metadata = None
 
-    def get_or_create_context(
-        self,
-        vehicle_id: str,
-        capacity_est: Optional[float] = None,
-    ) -> VehicleFilterContext:
+    def get_or_create_context(self, vehicle_id: str, capacity_est: Optional[float] = None) -> VehicleFilterContext:
         if vehicle_id not in self.contexts:
-            cap = (
-                capacity_est
-                if capacity_est and capacity_est > self.config.minimum_capacity
-                else self.config.default_capacity
-            )
+            calibrated = capacity_est if capacity_est and capacity_est > self.config.minimum_capacity else capacity_for_vehicle(vehicle_id)
+            known = calibrated is not None
             self.contexts[vehicle_id] = VehicleFilterContext(
                 vehicle_id=vehicle_id,
-                capacity_est=cap,
+                capacity_est=float(calibrated or 0.0),
+                capacity_known=known,
+                capacity_mode="KNOWN_CAPACITY" if known else "UNKNOWN_CAPACITY_MODE",
             )
         return self.contexts[vehicle_id]
 
     def reset_context(self, vehicle_id: str) -> None:
-        """Xoa trang context cua mot xe (khi chuyen phan doan moi)."""
-        if vehicle_id in self.contexts:
-            del self.contexts[vehicle_id]
+        self.contexts.pop(vehicle_id, None)
 
     @staticmethod
     def _normalize_timestamp(value: Union[str, datetime]) -> datetime:
         if isinstance(value, datetime):
             return value
-        for fmt in (
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%dT%H:%M:%S",
-            "%d/%m/%Y %H:%M:%S",
-            "%d/%m/%Y %H:%M",
-        ):
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M"):
             try:
                 return datetime.strptime(str(value).split(".")[0], fmt)
             except (TypeError, ValueError):
@@ -100,329 +83,135 @@ class AISmoothTrackingFilter:
             return default
         return default if math.isnan(number) else number
 
-    def _result(
-        self,
-        clean_fuel: float,
-        fuel_rate: float,
-        speed: float,
-        ai_state: str,
-        quality_flag: str,
-        motion: MotionEvidence,
-    ) -> Dict[str, Any]:
+    def _result(self, context: VehicleFilterContext, clean_fuel: float, fuel_rate: float, speed: float, ai_state: str, quality_flag: str, motion: MotionEvidence, guard_active: bool = False, operational_state: Optional[str] = None) -> Dict[str, Any]:
+        def rounded(value: Optional[float], digits: int = 4):
+            return None if value is None else round(float(value), digits)
+
         return {
-            "clean_fuel": round(clean_fuel, 2),
-            "fuel_rate": round(fuel_rate, 4),
+            "clean_fuel": round(clean_fuel, 2), "fuel_rate": round(fuel_rate, 4),
             "is_stopped": 1 if speed <= self.config.stopped_speed_kmh else 0,
-            "ai_state": normalize_signal_state(ai_state),
-            "signal_state": normalize_signal_state(ai_state),
-            "quality_flag": normalize_quality_flag(quality_flag),
-            "motion_state": motion.state,
-            "motion_confidence": round(motion.confidence, 3),
-            "gps_displacement_meters": round(motion.gps_displacement_meters, 2),
+            "ai_state": normalize_signal_state(ai_state), "signal_state": normalize_signal_state(ai_state),
+            "quality_flag": normalize_quality_flag(quality_flag), "motion_state": motion.state,
+            "motion_confidence": round(motion.confidence, 3), "gps_displacement_meters": round(motion.gps_displacement_meters, 2),
+            "OperationalState": operational_state or context.operational_state,
+            "StableBaseline": rounded(context.stable_baseline, 3),
+            "ExcursionBaseline": rounded(context.excursion_baseline, 3),
+            "ExcursionMin": rounded(context.excursion_min, 3), "ExcursionMax": rounded(context.excursion_max, 3),
+            "DeviationPct": rounded((context.last_raw_fuel - context.stable_baseline) / context.capacity_est if context.last_raw_fuel is not None and context.stable_baseline is not None else 0.0, 6),
+            "ExpectedFuelRate": rounded(context.last_expected_rate, 5), "ObservedFuelRate": rounded(context.last_observed_rate, 5),
+            "RateResidual": rounded(context.last_rate_residual, 5), "ReboundRatio": rounded(context.rebound_ratio, 4),
+            "PullbackRatio": rounded(context.pullback_ratio, 4), "PendingSamples": context.pending_samples,
+            "PendingElapsedMin": rounded(context.pending_elapsed_min, 3), "GuardActive": bool(guard_active),
+            "KalmanQ": rounded(context.last_kalman_q, 4), "KalmanR": rounded(context.last_kalman_r, 4),
+            "CleanFuel": round(clean_fuel, 2),
+            "CapacityMode": context.capacity_mode,
+            "CapacityEstimate": rounded(context.capacity_est, 3),
+            "RobustNoise": rounded(context.robust_noise, 4),
+            "InnovationGated": bool(context.innovation_gated),
+            "ShadowFuel": rounded(context.shadow_fuel, 3),
         }
 
-    def _resolve_ai_state(
-        self,
-        ctx: VehicleFilterContext,
-        raw_fuel: float,
-        speed: float,
-        dt_minutes: float,
-        known_ai_state: Optional[str],
-        motion: MotionEvidence,
-    ) -> str:
+    def _resolve_ai_state(self, context: VehicleFilterContext, raw_fuel: float, speed: float, dt_minutes: float, known_ai_state: Optional[str], motion: MotionEvidence, known_probability: Optional[float]) -> Tuple[str, float]:
         known_state = str(known_ai_state).strip()
-        if known_ai_state is not None and known_state not in (
-            "",
-            "nan",
-            "None",
-            "MODEL_NOT_FOUND",
-        ):
-            return known_state.upper()
-
+        if known_ai_state is not None and known_state not in ("", "nan", "None", "MODEL_NOT_FOUND"):
+            return known_state.upper(), self._normalize_number(known_probability, 0.0)
         if self.model is not None and self.feature_columns:
-            features = self.feature_extractor.model_features(
-                ctx,
-                raw_fuel,
-                speed,
-                dt_minutes,
-                motion,
-            )
+            features = self.feature_extractor.model_features(context, raw_fuel, speed, dt_minutes, motion)
             try:
-                vector = np.array(
-                    [[features.get(column, 0.0) for column in self.feature_columns]],
-                    dtype=float,
-                )
-                return str(self.model.predict(vector)[0])
+                vector = np.array([[features.get(column, 0.0) for column in self.feature_columns]], dtype=float)
+                prediction = str(self.model.predict(vector)[0])
+                probability = float(np.max(self.model.predict_proba(vector)[0])) if hasattr(self.model, "predict_proba") else 0.0
+                return prediction, probability
             except Exception:
-                return "STABLE_JITTER"
+                pass
+        delta = raw_fuel - float(context.last_clean_fuel)
+        shift = self.config.level_shift_capacity_ratio * context.capacity_est
+        if delta >= shift:
+            return "UPWARD_SHIFT", 0.5
+        if delta <= -shift:
+            return "DOWNWARD_SHIFT", 0.5
+        if speed > self.config.stopped_speed_kmh and delta < -0.05:
+            return "GRADUAL_CHANGE", 0.5
+        return "STABLE_JITTER", 0.5
 
-        delta_raw = raw_fuel - float(ctx.last_clean_fuel)
-        shift_threshold = max(
-            self.config.level_shift_floor,
-            self.config.level_shift_capacity_ratio * ctx.capacity_est,
-        )
-        if delta_raw >= shift_threshold:
-            return "UPWARD_SHIFT"
-        if delta_raw <= -shift_threshold:
-            return "DOWNWARD_SHIFT"
-        if speed > self.config.moving_speed_kmh and delta_raw < -0.3:
-            return "GRADUAL_CHANGE"
-        if abs(delta_raw) > 2.0:
-            return "OSCILLATION_NOISE"
-        return "STABLE_JITTER"
-
-    def process_point(
-        self,
-        vehicle_id: str,
-        timestamp: Union[str, datetime],
-        raw_fuel: Optional[float],
-        speed: float = 0.0,
-        capacity_est: Optional[float] = None,
-        known_ai_state: Optional[str] = None,
-        lat: Optional[float] = None,
-        lng: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        """
-        Xu ly 1 diem do duy nhat theo thoi gian thuc (Causal).
-        Tra ve: clean_fuel, fuel_rate (L/min), is_stopped (0/1), ai_state, quality_flag.
-        """
-        # 1. Chuan hoa kieu du lieu
+    def process_point(self, vehicle_id: str, timestamp: Union[str, datetime], raw_fuel: Optional[float], speed: float = 0.0, capacity_est: Optional[float] = None, known_ai_state: Optional[str] = None, lat: Optional[float] = None, lng: Optional[float] = None, segment_id: Optional[object] = None, known_ai_probability: Optional[float] = None) -> Dict[str, Any]:
         timestamp = self._normalize_timestamp(timestamp)
         speed = self._normalize_number(speed, 0.0)
-        raw_val = self._normalize_number(raw_fuel, np.nan)
+        raw = self._normalize_number(raw_fuel, np.nan)
         coordinate = self.feature_extractor._valid_coordinate(lat, lng)
+        context = self.get_or_create_context(vehicle_id, capacity_est)
+        segment_key = None if segment_id is None else str(segment_id)
+        time_gap = (timestamp - context.last_time).total_seconds() / 60.0 if context.last_time else 0.0
+        must_reset = context.last_clean_fuel is not None and ((segment_key is not None and context.segment_id is not None and segment_key != context.segment_id) or time_gap > self.config.reset_gap_minutes)
+        if must_reset:
+            self.reset_context(vehicle_id)
+            context = self.get_or_create_context(vehicle_id, capacity_est)
+        context.segment_id = segment_key
+        motion = self.feature_extractor.motion_evidence(context, speed, lat, lng)
 
-        ctx = self.get_or_create_context(vehicle_id, capacity_est)
-        motion = self.feature_extractor.motion_evidence(ctx, speed, lat, lng)
+        if context.last_clean_fuel is None:
+            initial = self.config.initial_fuel_fallback if math.isnan(raw) or raw <= 0.0 else raw
+            if context.capacity_known and initial > context.capacity_est * self.config.inferred_capacity_headroom:
+                context.capacity_known = False
+                context.capacity_mode = "UNKNOWN_CAPACITY_MODE"
+            if not context.capacity_known:
+                context.capacity_est = max(self.config.minimum_capacity, initial * 1.25)
+            context.last_clean_fuel = initial; context.kalman_x = initial; context.kalman_p = 1.0
+            context.last_time = timestamp; context.last_raw_fuel = raw
+            context.history_fuel.append(initial); context.history_time.append(timestamp)
+            context.history_speed.append(speed); context.history_coordinates.append(coordinate)
+            self.guard.reset(context, initial)
+            return self._result(context, initial, 0.0, speed, "INIT", "VALID", motion)
 
-        # 2. Xu ly diem khoi tao dau tien
-        if ctx.last_clean_fuel is None:
-            if math.isnan(raw_val) or raw_val <= 0.0:
-                init_val = self.config.initial_fuel_fallback
-            else:
-                init_val = raw_val
-                if capacity_est is None:
-                    ctx.capacity_est = max(
-                        init_val * self.config.inferred_capacity_headroom,
-                        self.config.default_capacity,
-                    )
+        dt_minutes = max(time_gap if time_gap >= 0.0 else self.config.nominal_period_minutes, 0.1)
+        if context.capacity_known and raw > context.capacity_est * self.config.inferred_capacity_headroom:
+            context.capacity_known = False
+            context.capacity_mode = "UNKNOWN_CAPACITY_MODE"
+            context.capacity_est = raw * 1.25
+        elif not context.capacity_known and raw > context.capacity_est:
+            context.capacity_est = raw * 1.25
+        ai_state, probability = self._resolve_ai_state(context, raw, speed, dt_minutes, known_ai_state, motion, known_ai_probability)
+        ai_state = normalize_signal_state(ai_state)
+        if math.isnan(raw) or raw <= 0.0:
+            context.classifier_probability = probability
+            context.last_time = timestamp; context.history_time.append(timestamp)
+            context.history_speed.append(speed); context.history_coordinates.append(coordinate)
+            return self._result(context, float(context.last_clean_fuel), 0.0, speed, ai_state, "ZERO_DROPOUT_HELD", motion, True)
 
-            ctx.last_clean_fuel = init_val
-            ctx.kalman_x = init_val
-            ctx.kalman_p = 1.0
-            ctx.last_time = timestamp
-            ctx.last_raw_fuel = raw_val
-            ctx.history_fuel.append(init_val)
-            ctx.history_time.append(timestamp)
-            ctx.history_speed.append(speed)
-            ctx.history_coordinates.append(coordinate)
-
-            return self._result(init_val, 0.0, speed, "INIT", "VALID", motion)
-
-        # 3. Tinh khoang cach thoi gian dt
-        dt_sec = (timestamp - ctx.last_time).total_seconds() if ctx.last_time else 120.0
-        if dt_sec < 0:
-            dt_sec = 120.0
-        dt_minutes = max(dt_sec / 60.0, 0.1)
-
-        # Mat ket noi qua 120 phut -> Reset Kalman de tranh keo lech sau khoang trong dai
-        if dt_minutes > self.config.reset_gap_minutes and not math.isnan(raw_val) and raw_val > 0:
-            ctx.kalman_x = raw_val
-            ctx.kalman_p = 1.0
-            ctx.last_clean_fuel = raw_val
-            ctx.recent_upward_steps = 0
-            ctx.pending_downward_count = 0
-            ctx.history_fuel.clear()
-            ctx.history_time.clear()
-            ctx.history_speed.clear()
-            ctx.history_coordinates.clear()
-
-        # 4. Tu dong cap nhat tran dung tich neu nhien lieu do duoc cao hon
-        if not math.isnan(raw_val) and raw_val > ctx.capacity_est:
-            ctx.capacity_est = float(raw_val * self.config.capacity_headroom)
-
-        # 5. Xac dinh trang thai AI
-        ai_state = normalize_signal_state(self._resolve_ai_state(
-            ctx=ctx,
-            raw_fuel=raw_val,
-            speed=speed,
-            dt_minutes=dt_minutes,
-            known_ai_state=known_ai_state,
-            motion=motion,
-        ))
-
-        # 6. Kiem tra va loai bo loi cam bien: NaN, rot ve 0, Spike xung
-        if math.isnan(raw_val) or raw_val <= 0.0 or ai_state in ("SPIKE", "IMPULSE_NOISE"):
-            ctx.last_time = timestamp
-            ctx.history_time.append(timestamp)
-            ctx.history_speed.append(speed)
-            ctx.history_coordinates.append(coordinate)
-            quality_flag = (
-                "SPIKE_HELD"
-                if ai_state in ("SPIKE", "IMPULSE_NOISE")
-                else "ZERO_DROPOUT_HELD"
+        jitter = max(self.config.jitter_floor, self.config.jitter_capacity_ratio * context.capacity_est)
+        window = self.feature_extractor.window_evidence(context, raw, jitter)
+        trend = self.feature_extractor.trend_evidence(context, raw, speed, jitter)
+        decision = self.guard.evaluate(context, raw, speed, dt_minutes, ai_state, probability, motion, window, trend)
+        context.classifier_probability = probability
+        context.last_expected_rate = decision.expected_rate; context.last_observed_rate = decision.observed_rate
+        context.last_rate_residual = decision.rate_residual
+        clean = adaptive_kalman_update(context, decision.target, dt_minutes, decision.q, decision.r, self.config)
+        if decision.state == "GRADUAL_TRACKING":
+            step_scale = context.capacity_est if context.capacity_known else max(abs(float(context.last_clean_fuel)), self.config.minimum_capacity)
+            step_pct = self.config.gradual_max_step_pct if context.capacity_known else self.config.unknown_gradual_max_step_pct
+            max_step = step_pct * step_scale
+            lower = float(context.last_clean_fuel) - max_step
+            upper = float(context.last_clean_fuel) + max_step
+            clean = max(lower, min(upper, clean))
+            context.kalman_x = clean
+        elif decision.state in ("DOWNWARD_CONFIRMED", "UPWARD_CONFIRMED"):
+            fraction = min(1.0, context.confirmed_ramp_step / max(1, self.config.confirmed_tracking_samples - 1))
+            step_pct = self.config.confirmed_step_start_pct + fraction * (
+                self.config.confirmed_step_end_pct - self.config.confirmed_step_start_pct
             )
-            return self._result(
-                float(ctx.last_clean_fuel),
-                0.0,
-                speed,
-                ai_state,
-                quality_flag,
-                motion,
-            )
-
-        # 7. LOI THUAT TOAN THICH NGHI 2 CHE DO (BAM SAT & LAM MUOT)
-        delta_from_clean = raw_val - ctx.last_clean_fuel
-        level_shift_threshold = max(
-            self.config.level_shift_floor,
-            self.config.level_shift_capacity_ratio * ctx.capacity_est,
-        )
-
-        # Giam thoi gian bao ve sau mot dich chuyen mat bang tang.
-        if ctx.recent_upward_steps > 0:
-            ctx.recent_upward_steps -= 1
-
-        quality_flag = "VALID"
-
-        jitter = max(
-            self.config.jitter_floor,
-            self.config.jitter_capacity_ratio * ctx.capacity_est,
-        )
-        window = self.feature_extractor.window_evidence(ctx, raw_val, jitter)
-        trend = self.feature_extractor.trend_evidence(ctx, raw_val, speed, jitter)
-        recent_four = window.recent_values[-4:]
-        stable_lower_level = (
-            len(recent_four) >= 4
-            and max(recent_four) - min(recent_four) <= max(1.0, jitter * 0.8)
-            and float(statistics.median(recent_four))
-            <= ctx.last_clean_fuel - max(0.8, jitter * 0.5)
-        )
-
-        # --- A. XAC NHAN DICH CHUYEN MAT BANG TANG (causal plateau/reversal guard) ---
-        is_upward_shift = False
-        plateau_tol = max(3.0, 0.006 * ctx.capacity_est)
-
-        # 1. Theo doi ung vien dich chuyen tang dang cho xac nhan.
-        if ctx.upward_anchor is not None:
-            # Neu tut ve gan anchor cu -> DAO CHIEU (Reversal): Huy bo ngay lap tuc!
-            if raw_val <= ctx.upward_anchor + level_shift_threshold * 0.4:
-                ctx.upward_anchor = None
-                ctx.upward_samples.clear()
-                ctx.rise_count = 0
-                quality_flag = "UPWARD_REVERSAL_REJECTED"
+            if context.capacity_known:
+                max_step = step_pct * context.capacity_est
             else:
-                ctx.upward_samples.append(raw_val)
-                spread = max(ctx.upward_samples) - min(ctx.upward_samples)
-                # Tăng tiến liên tục (Ramp >= 3 nhịp) HOẶC tạo mặt bằng ổn định trên cao (Plateau >= 3 nhịp)
-                is_advancing = (len(ctx.upward_samples) >= 3 and
-                                all(ctx.upward_samples[k] >= ctx.upward_samples[k-1] - 1.5 for k in range(1, len(ctx.upward_samples))))
-                is_stable_plateau = (len(ctx.upward_samples) >= 3 and spread <= plateau_tol * 1.5)
-                # Hoặc có AI xác nhận rõ ràng UPWARD_SHIFT / RISING từ nhịp 2
-                ai_supported = (len(ctx.upward_samples) >= 2 and ai_state == "UPWARD_SHIFT")
-
-                if is_advancing or is_stable_plateau or ai_supported:
-                    is_upward_shift = True
-                    ctx.upward_anchor = None
-                    ctx.upward_samples.clear()
-                else:
-                    clean_fuel = ctx.last_clean_fuel
-                    quality_flag = "PENDING_UPWARD_SHIFT_HELD"
-        elif delta_from_clean >= level_shift_threshold:
-            if ctx.recent_upward_steps > 0:
-                is_upward_shift = True
-            else:
-                ctx.upward_anchor = ctx.last_clean_fuel
-                ctx.upward_samples = [raw_val]
-                clean_fuel = ctx.last_clean_fuel
-                quality_flag = "PENDING_UPWARD_SHIFT_HELD"
-        elif ctx.recent_upward_steps > 0 and delta_from_clean >= 1.0:
-            is_upward_shift = True
-        else:
-            ctx.upward_anchor = None
-            ctx.upward_samples.clear()
-            ctx.rise_count = 0
-
-        if is_upward_shift:
-            ctx.rise_count = 0
-            ctx.upward_anchor = None
-            ctx.upward_samples.clear()
-            clean_fuel = raw_val
-            ctx.kalman_x = raw_val
-            ctx.kalman_p = 4.0
-            ctx.recent_upward_steps = self.config.upward_hold_steps
-            ctx.pending_downward_count = 0
-            ctx.drop_count = 0
-            quality_flag = "UPWARD_SHIFT_TRACKED"
-
-        # Neu dang bao ve sau dich chuyen tang ma raw quay lai gan muc cu: hoan tac.
-        elif ctx.recent_upward_steps > 0 and delta_from_clean <= -level_shift_threshold * 0.5:
-            ctx.recent_upward_steps = 0
-            ctx.kalman_x = raw_val
-            clean_fuel = raw_val
-            quality_flag = "UPWARD_REVERSAL_RESET"
-
-        # --- B. XAC NHAN DICH CHUYEN MAT BANG GIAM (3 nhip causal) ---
-        elif delta_from_clean <= -level_shift_threshold and quality_flag != "PENDING_UPWARD_SHIFT_HELD":
-            ctx.pending_downward_count += 1
-            if ctx.pending_downward_count >= self.config.downward_confirm_points:
-                # Xac nhan mat bang thap moi sau 3 nhip lien tiep.
-                clean_fuel = raw_val
-                ctx.kalman_x = raw_val
-                ctx.kalman_p = 4.0
-                ctx.pending_downward_count = 0
-                ctx.drop_count = 0
-                quality_flag = "DOWNWARD_SHIFT_TRACKED"
-            else:
-                clean_fuel = ctx.last_clean_fuel
-                quality_flag = "PENDING_DOWNWARD_SHIFT_HELD"
-
-        # Muc thap khong du nguong su kien lon van duoc chap nhan khi bon
-        # phep do lien tiep tao thanh mot mat bang hep. Day la thay doi muc
-        # cua tin hieu, khong gan y nghia nghiep vu cho thay doi nay.
-        elif stable_lower_level and quality_flag != "PENDING_UPWARD_SHIFT_HELD":
-            stable_target = float(statistics.median(recent_four))
-            stable_step = self.config.stable_level_gain * (stable_target - ctx.kalman_x)
-            stable_step_limit = max(4.0, jitter * 3.0)
-            stable_step = max(-stable_step_limit, min(stable_step_limit, stable_step))
-            clean_fuel = ctx.kalman_x + stable_step
-            ctx.kalman_x = clean_fuel
-            ctx.kalman_p = 2.0
-            ctx.pending_downward_count = 0
-            ctx.drop_count = 0
-            quality_flag = "STABLE_LEVEL_TRACKING"
-
-        # --- C. CHE DO LAM MUOT DOI XUNG & BAM DOC TIEU HAO (TREND-ADAPTIVE) ---
-        elif quality_flag != "PENDING_UPWARD_SHIFT_HELD":
-            ctx.pending_downward_count = 0
-            clean_fuel = smooth_kalman_update(
-                context=ctx,
-                raw_fuel=raw_val,
-                speed=speed,
-                dt_minutes=dt_minutes,
-                ai_state=ai_state,
-                jitter=jitter,
-                window=window,
-                trend=trend,
-                config=self.config,
-                motion=motion,
-            )
-            quality_flag = "SMOOTH_KALMAN"
-
-        # 8. Gioi han vat ly
-        clean_fuel = max(
-            0.0,
-            min(float(clean_fuel), ctx.capacity_est * self.config.inferred_capacity_headroom),
-        )
-
-        fuel_rate = (clean_fuel - ctx.last_clean_fuel) / dt_minutes
-
-        # Cap nhat bo nho cho nhip tiep theo
-        ctx.last_clean_fuel = clean_fuel
-        ctx.last_raw_fuel = raw_val
-        ctx.last_time = timestamp
-        ctx.history_fuel.append(raw_val)
-        ctx.history_time.append(timestamp)
-        ctx.history_speed.append(speed)
-        ctx.history_coordinates.append(coordinate)
-
-        return self._result(clean_fuel, fuel_rate, speed, ai_state, quality_flag, motion)
+                level_scale = max(abs(float(context.last_clean_fuel)), self.config.minimum_capacity)
+                max_step = self.config.unknown_gradual_max_step_pct * level_scale
+            lower = float(context.last_clean_fuel) - max_step
+            upper = float(context.last_clean_fuel) + max_step
+            clean = max(lower, min(upper, clean))
+            context.kalman_x = clean
+        clean = max(0.0, min(clean, context.capacity_est * self.config.inferred_capacity_headroom))
+        fuel_rate = (clean - float(context.last_clean_fuel)) / dt_minutes
+        context.last_clean_fuel = clean; context.last_raw_fuel = raw; context.last_time = timestamp
+        context.history_fuel.append(raw); context.history_time.append(timestamp); context.history_speed.append(speed)
+        context.history_coordinates.append(coordinate)
+        self.guard.after_update(context, clean, window, motion)
+        return self._result(context, clean, fuel_rate, speed, ai_state, decision.quality_flag, motion, decision.guard_active, decision.state)

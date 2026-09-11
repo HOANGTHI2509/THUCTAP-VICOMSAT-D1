@@ -61,6 +61,16 @@ def filter_smooth_tracking_dataframe(
     motion_states = []
     motion_confidences = []
     gps_displacements = []
+    debug_columns = (
+        "OperationalState", "StableBaseline", "ExcursionBaseline",
+        "ExcursionMin", "ExcursionMax", "DeviationPct", "ExpectedFuelRate",
+        "ObservedFuelRate", "RateResidual", "ReboundRatio", "PullbackRatio",
+        "PendingSamples", "PendingElapsedMin", "GuardActive", "KalmanQ",
+        "KalmanR", "CleanFuel",
+        "CapacityMode", "CapacityEstimate", "RobustNoise",
+        "InnovationGated", "ShadowFuel",
+    )
+    diagnostics = {column: [] for column in debug_columns}
 
     time_col = "FuelTime" if "FuelTime" in df_out.columns else df_out.columns[0]
     fuel_col = "FuelLevel" if "FuelLevel" in df_out.columns else "Nhiên liệu"
@@ -76,6 +86,8 @@ def filter_smooth_tracking_dataframe(
         lat = getattr(row, lat_col, None) if lat_col else None
         lng = getattr(row, lng_col, None) if lng_col else None
         known_ai = getattr(row, "AI_State", None) if has_precomputed_ai else None
+        known_probability = getattr(row, "AI_Probability", None) if "AI_Probability" in df_out.columns else None
+        segment_id = getattr(row, "SegmentID", None) if "SegmentID" in df_out.columns else None
 
         res = filter_engine.process_point(
             vehicle_id=vehicle_id,
@@ -86,6 +98,8 @@ def filter_smooth_tracking_dataframe(
             known_ai_state=known_ai,
             lat=lat,
             lng=lng,
+            segment_id=segment_id,
+            known_ai_probability=known_probability,
         )
         clean_fuels.append(res["clean_fuel"])
         fuel_rates.append(res["fuel_rate"])
@@ -95,6 +109,8 @@ def filter_smooth_tracking_dataframe(
         motion_states.append(res["motion_state"])
         motion_confidences.append(res["motion_confidence"])
         gps_displacements.append(res["gps_displacement_meters"])
+        for column in debug_columns:
+            diagnostics[column].append(res[column])
 
     df_out["CleanFuel_SmoothTracking"] = clean_fuels
     df_out["FuelRate_SmoothTracking"] = fuel_rates
@@ -104,5 +120,7 @@ def filter_smooth_tracking_dataframe(
     df_out["MotionState_SmoothTracking"] = motion_states
     df_out["MotionConfidence_SmoothTracking"] = motion_confidences
     df_out["GpsDisplacementMeters_SmoothTracking"] = gps_displacements
+    for column, values in diagnostics.items():
+        df_out[column] = values
 
     return df_out

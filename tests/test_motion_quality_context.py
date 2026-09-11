@@ -78,7 +78,7 @@ def test_speed_and_gps_conflict_remains_uncertain():
     assert gps_only[-1]["motion_state"] == "UNCERTAIN"
 
 
-def test_low_motion_uses_a_lighter_tracking_baseline_than_legacy_speed_only():
+def test_low_motion_capacity_guard_is_not_looser_than_missing_gps():
     clustered_coordinates = [
         (21.00000, 105.00000),
         (21.00001, 105.00001),

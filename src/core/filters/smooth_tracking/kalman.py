@@ -6,6 +6,25 @@ from .config import SmoothTrackingConfig
 from .state import MotionEvidence, TrendEvidence, VehicleFilterContext, WindowEvidence
 
 
+def adaptive_kalman_update(
+    context: VehicleFilterContext,
+    target: float,
+    dt_minutes: float,
+    process_noise: float,
+    measurement_noise: float,
+    config: SmoothTrackingConfig,
+) -> float:
+    """One causal scalar Kalman update using OperationalGuard's Q/R mapping."""
+    dt_ratio = max(0.1, min(10.0, dt_minutes / config.nominal_period_minutes))
+    predicted_covariance = context.kalman_p + process_noise * dt_ratio
+    gain = predicted_covariance / (predicted_covariance + measurement_noise)
+    context.kalman_x = float(context.kalman_x) + gain * (target - float(context.kalman_x))
+    context.kalman_p = max(1e-6, (1.0 - gain) * predicted_covariance)
+    context.last_kalman_q = process_noise
+    context.last_kalman_r = measurement_noise
+    return float(context.kalman_x)
+
+
 def smooth_kalman_update(
     context: VehicleFilterContext,
     raw_fuel: float,

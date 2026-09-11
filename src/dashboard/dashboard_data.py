@@ -11,22 +11,10 @@ import pandas as pd
 from src.core.filters.smooth_tracking import AISmoothTrackingFilter
 from src.core.filters.smooth_tracking.dataframe import filter_smooth_tracking_dataframe
 from src.core.filters.smooth_tracking.state import VehicleFilterContext
+from src.core.filters.smooth_tracking.capacity import capacity_for_vehicle
 
 
 REQUIRED_COLUMNS = ("FuelTime", "FuelLevel")
-
-
-KNOWN_CAPACITIES = {
-    "24H-04650": 800.0,
-    "29E-45520": 200.0,
-    "29E-45560": 200.0,
-    "29E-51878": 200.0,
-    "29H-41394": 350.0,
-    "29H75028": 100.0,
-    "35H-09245": 400.0,
-    "90H-03494": 600.0,
-    "92H-03625": 200.0,
-}
 
 
 def available_vehicle_sources(data_directory: Path) -> dict[str, Path]:
@@ -90,22 +78,17 @@ def load_telemetry_csv(file_path: Path) -> pd.DataFrame:
     return frame.sort_values(["SegmentID", "FuelTime"], kind="stable")
 
 
-def estimate_capacity_liters(frame: pd.DataFrame, vehicle_id: str = "") -> float:
-    """Estimate a safe threshold scale when calibration capacity is unavailable."""
-    if vehicle_id and vehicle_id in KNOWN_CAPACITIES:
-        return KNOWN_CAPACITIES[vehicle_id]
-    fuel = pd.to_numeric(frame["FuelLevel"], errors="coerce")
-    fuel = fuel[(fuel > 0) & fuel.notna()]
-    if fuel.empty:
-        return 200.0
-    return max(200.0, float(fuel.quantile(0.995)))
+def estimate_capacity_liters(frame: pd.DataFrame, vehicle_id: str = "") -> float | None:
+    """Return only calibrated capacity; unknown vehicles stay explicitly unknown."""
+    del frame
+    return capacity_for_vehicle(vehicle_id)
 
 
 def _predict_causal_states_batch(
     frame: pd.DataFrame,
     engine: AISmoothTrackingFilter,
     vehicle_id: str,
-    capacity_est_liters: float,
+    capacity_est_liters: float | None,
 ) -> pd.Series | None:
     """Predict model states in one call while preserving causal features.
 
@@ -122,11 +105,12 @@ def _predict_causal_states_batch(
         vehicle_id=vehicle_id,
         capacity_est=(
             capacity_est_liters
-            if capacity_est_liters > config.minimum_capacity
-            else config.default_capacity
+            if capacity_est_liters and capacity_est_liters > config.minimum_capacity
+            else 0.0
         ),
     )
     states = np.full(len(frame), "STABLE_JITTER", dtype=object)
+    probabilities = np.zeros(len(frame), dtype=float)
     feature_rows: list[list[float]] = []
     feature_positions: list[int] = []
 
@@ -146,6 +130,8 @@ def _predict_causal_states_batch(
                 else raw_fuel
             )
             context.last_clean_fuel = initial
+            if not capacity_est_liters:
+                context.capacity_est = max(config.minimum_capacity, initial * 1.25)
             context.kalman_x = initial
             context.kalman_p = 1.0
             context.last_time = timestamp
@@ -210,17 +196,25 @@ def _predict_causal_states_batch(
         try:
             predictions = engine.model.predict(np.asarray(feature_rows, dtype=float))
             states[feature_positions] = predictions
+            if hasattr(engine.model, "predict_proba"):
+                predicted_probabilities = np.max(
+                    engine.model.predict_proba(np.asarray(feature_rows, dtype=float)),
+                    axis=1,
+                )
+                probabilities[feature_positions] = predicted_probabilities
         except Exception:
             # The realtime engine falls back to STABLE_JITTER on model errors.
             pass
 
-    return pd.Series(states, index=frame.index, dtype="object")
+    result = pd.Series(states, index=frame.index, dtype="object")
+    result.attrs["probabilities"] = pd.Series(probabilities, index=frame.index, dtype=float)
+    return result
 
 
 def run_topic1_filter(
     frame: pd.DataFrame,
     vehicle_id: str,
-    capacity_est_liters: float,
+    capacity_est_liters: float | None,
     model_dir: str = "models/fuel_state_classifier",
 ) -> pd.DataFrame:
     """Run only the causal purple filter and expose the canonical diagnostics.
@@ -247,9 +241,10 @@ def run_topic1_filter(
         )
         if predicted_states is not None:
             segment["AI_State"] = predicted_states
+            segment["AI_Probability"] = predicted_states.attrs.get("probabilities", 0.0)
         filtered = filter_smooth_tracking_dataframe(
             segment,
-            vehicle_id=f"{vehicle_id}:{segment_id}",
+            vehicle_id=vehicle_id,
             capacity_est=capacity_est_liters,
             filter_engine=engine,
         )
@@ -269,7 +264,8 @@ def run_topic1_filter(
     )
     from src.core.filters.ai_enhanced_adaptive_realtime import chay_kalman_thich_nghi_1d
 
-    result["Kalman_Adaptive"] = chay_kalman_thich_nghi_1d(
-        result, capacity=capacity_est_liters
+    adaptive_capacity = capacity_est_liters or max(
+        1.0, float(pd.to_numeric(result["FuelLevel"], errors="coerce").quantile(0.995)) * 1.25
     )
+    result["Kalman_Adaptive"] = chay_kalman_thich_nghi_1d(result, capacity=adaptive_capacity)
     return result
