@@ -1,4 +1,4 @@
-# VICOMSAT — Real-time Fuel Data Denoising & Filtering (Đề tài 1)
+# VCOMSAT — Real-time Fuel Data Denoising & Filtering (Đề tài 1)
 
 > **Hệ thống xử lý nhiễu và lọc tín hiệu mức nhiên liệu viễn thông theo thời gian thực (Causal Filtering)**  
 > Phiên bản bàn giao: `1.2.0-enterprise` | Trạng thái kiểm thử: `83/83 unit/regression tests passed`, `18/19 golden behavior checks`
@@ -75,70 +75,70 @@ flowchart LR
 Hệ thống được module hóa chặt chẽ, phân tách rõ giữa thuật toán lõi, tầng dịch vụ, công cụ kiểm thử và tài liệu:
 
 ```text
-D:\THUCTAP_VICOMSAT\
+THUCTAP-VCOMSAT/
 ├── src/
-│   ├── core/                                # Lõi xử lý tín hiệu và thuật toán
-│   │   └── filters/
-│   │       ├── smooth_tracking/             # MODULE LÕI ĐƯỜNG TÍM CHÍNH THỨC
-│   │       │   ├── __init__.py              # Export engine và cấu hình chuẩn
-│   │       │   ├── config.py                # Toàn bộ tham số cấu hình Q, R, ngưỡng
-│   │       │   ├── contracts.py             # Kiểu dữ liệu và định dạng đầu ra
-│   │       │   ├── dataframe.py             # Hỗ trợ chạy batch DataFrame cho kiểm thử
-│   │       │   ├── engine.py                # Lõi điều phối chính (SmoothTrackingFilterEngine)
-│   │       │   ├── features.py              # Trích xuất 15 đặc trưng causal
-│   │       │   ├── kalman.py                # Triển khai thuật toán Adaptive Kalman 1D
-│   │       │   └── state.py                 # Cấu trúc lưu trạng thái bộ đếm từng xe
-│   │       ├── ai_smooth_tracking_filter.py # Lớp bọc tương thích ngược (Backward Compatibility)
-│   │       └── ai_state_filter.py           # Module hỗ trợ phân loại tín hiệu
-│   ├── service/                             # Microservice REST API & State Backend
-│   │   ├── api.py                           # ENTRY POINT REST API chính (FastAPI)
+│   ├── core/                                # Tầng xử lý tín hiệu lõi
+│   │   └── filters/                         # Các thuật toán lọc tín hiệu nhiên liệu
+│   │       ├── smooth_tracking/             # Thuật toán lọc mượt thích ứng thời gian thực (AI Smooth-Tracking)
+│   │       │   ├── __init__.py              # Khởi tạo package và xuất interface chuẩn
+│   │       │   ├── config.py                # Cấu hình tham số lọc (ma trận Q, R, ngưỡng dịch chuyển)
+│   │       │   ├── contracts.py             # Định nghĩa cấu trúc dữ liệu và chuẩn hóa trạng thái
+│   │       │   ├── dataframe.py             # Bộ điều phối xử lý theo lô (batch processing) cho DataFrame
+│   │       │   ├── engine.py                # Động cơ điều phối lọc trực tuyến theo từng điểm đo
+│   │       │   ├── features.py              # Trích xuất đặc trưng nhân quả (Causal Features)
+│   │       │   ├── kalman.py                # Thuật toán lọc Kalman thích ứng 1D
+│   │       │   └── state.py                 # Quản lý và lưu trữ ngữ cảnh trạng thái theo từng xe
+│   │       ├── ai_smooth_tracking_filter.py       # Facade tương thích ngược cho các module cũ
+│   │       └── ai_enhanced_adaptive_realtime.py   # Thuật toán Adaptive Kalman Filter 1D đối chứng
+│   ├── service/                             # Tầng dịch vụ Microservice REST API & Quản lý State
+│   │   ├── api.py                           # REST API endpoint thời gian thực (FastAPI)
 │   │   ├── queue_manager.py                 # Quản lý hàng đợi FIFO tuần tự theo từng xe
-│   │   ├── state_manager.py                 # Điều phối lưu trữ RAM / Redis state
-│   │   └── state_store.py                   # Lớp trừu tượng hóa Storage (Memory/Redis)
+│   │   ├── state_manager.py                 # Điều phối lưu trữ trạng thái phương tiện
+│   │   └── state_store.py                   # Tầng trừu tượng hóa bộ nhớ State (Memory / Redis)
 │   ├── sdk/
-│   │   └── fuel_cleaner.py                  # Python SDK nhúng trực tiếp không qua HTTP
+│   │   └── fuel_cleaner.py                  # Thư viện Python SDK tích hợp trực tiếp không qua mạng
 │   ├── dashboard/
-│   │   ├── app_dashboard_tienxuly.py        # Giao diện Streamlit kiểm tra trực quan (9 xe fulltt + 5 xe CarFuel)
-│   │   └── dashboard_data.py                # Module tải dữ liệu đa nguồn (fulltt, CarFuelHistory)
+│   │   ├── app_dashboard_tienxuly.py        # Giao diện trực quan hóa và giám sát tín hiệu (Streamlit)
+│   │   └── dashboard_data.py                # Module nạp và chuẩn hóa dữ liệu viễn thông đa nguồn
 │   └── pipeline/
-│       └── train_fuel_state_classifier.py   # Pipeline huấn luyện mô hình AI offline
-├── models/                                  # Trọng số mô hình AI chính thức
-│   └── fuel_state_classifier/               # Model Random Forest 28 đặc trưng đang sử dụng
-│       ├── fuel_state_classifier.pkl        # Model Random Forest chính thức
-│       ├── metadata.json                    # Thứ tự 28 đặc trưng và siêu tham số
-│       └── test_confusion_matrix.png        # Ma trận nhầm lẫn gốc
+│       └── train_fuel_state_classifier.py   # Quy trình huấn luyện mô hình Machine Learning offline
+├── models/                                  # Trọng số mô hình Machine Learning
+│   └── fuel_state_classifier/               # Mô hình Random Forest 28 đặc trưng
+│       ├── fuel_state_classifier.pkl        # File trọng số mô hình đã huấn luyện
+│       ├── metadata.json                    # Danh sách 28 đặc trưng và siêu tham số
+│       └── test_confusion_matrix.png        # Ma trận nhầm lẫn gốc trên tập kiểm thử
 ├── reports/
-│   └── confusion_matrices/                  # Báo cáo ma trận nhầm lẫn 34 xe
-│       ├── summary_per_vehicle.md           # Báo cáo Markdown chi tiết
-│       ├── fleet_accuracy_summary.csv       # Tổng hợp phân bố & độ chính xác
-│       ├── svg/                             # File ảnh vector SVG từng xe (cm_<xe>.svg)
-│       └── csv/                             # File ma trận CSV từng xe
-├── docs/                                    # Tài liệu và hình ảnh kỹ thuật
-│   ├── images/                              # Ảnh tài liệu và biểu đồ vector SVG
-│   │   ├── cm_92H-03625.svg                 # Ma trận vector xe 92H-03625
-│   │   ├── test_held_out_confusion_matrix.svg # Ma trận vector tập Test độc lập
-│   │   ├── overall_fleet_confusion_matrix.svg # Ma trận vector toàn hạm đội
-│   │   ├── filter_comparison_visual.png     # Ảnh so sánh trực quan bộ lọc
-│   │   └── adaptive_kalman_behavior.png     # Ảnh hành vi bám thích ứng
-│   └── API_DOCUMENTATION.md                 # Đặc tả chi tiết các REST API endpoints
-├── tests/                                   # Bộ kiểm thử tự động (83 tests)
+│   └── confusion_matrices/                  # Báo cáo đánh giá ma trận nhầm lẫn 34 phương tiện
+│       ├── summary_per_vehicle.md           # Báo cáo chi tiết dạng văn bản Markdown
+│       ├── fleet_accuracy_summary.csv       # Tổng hợp phân bố mẫu và độ chính xác toàn hạm đội
+│       ├── svg/                             # Biểu đồ vector SVG từng xe (cm_<xe>.svg)
+│       └── csv/                             # Bảng ma trận nhầm lẫn dạng CSV từng xe
+├── docs/                                    # Tài liệu thiết kế kỹ thuật và tài nguyên đồ họa
+│   ├── images/                              # Biểu đồ kỹ thuật và ma trận dạng vector SVG / PNG
+│   │   ├── cm_92H-03625.svg                 # Ma trận nhầm lẫn xe mẫu 92H-03625
+│   │   ├── test_held_out_confusion_matrix.svg # Ma trận nhầm lẫn trên tập Test độc lập
+│   │   ├── overall_fleet_confusion_matrix.svg # Ma trận nhầm lẫn tổng hợp toàn bộ 34 xe
+│   │   ├── filter_comparison_visual.png     # Biểu đồ so sánh trực quan các phương pháp lọc
+│   │   └── adaptive_kalman_behavior.png     # Biểu đồ cơ chế bám thích ứng của Kalman
+│   └── API_DOCUMENTATION.md                 # Tài liệu đặc tả kỹ thuật REST API
+├── tests/                                   # Bộ kiểm thử tự động toàn diện (83 tests)
 │   ├── fixtures/
-│   │   ├── golden_fuel_segments.json        # 8 đoạn dữ liệu vàng thực tế từ xe chạy
-│   │   └── README.md                        # Hướng dẫn quy trình review golden segment
-│   ├── test_real_data_golden_segments.py    # Kiểm thử hồi quy golden segment
-│   ├── test_concurrent_streaming.py         # Kiểm thử an toàn đa luồng và thứ tự FIFO
-│   ├── test_motion_quality_context.py       # Kiểm thử xác định chuyển động Speed + GPS
-│   └── test_purple_service_unification.py   # Kiểm thử đồng nhất giữa API, SDK và Engine
+│   │   ├── golden_fuel_segments.json        # Dữ liệu kiểm thử chuẩn từ các đoạn vận hành thực tế
+│   │   └── README.md                        # Hướng dẫn quy trình đánh giá và nghiệm thu dữ liệu chuẩn
+│   ├── test_real_data_golden_segments.py    # Kiểm thử hồi quy trên các đoạn dữ liệu thực tế
+│   ├── test_concurrent_streaming.py         # Kiểm thử an toàn luồng và xử lý tuần tự FIFO
+│   ├── test_motion_quality_context.py       # Kiểm thử logic phân định trạng thái vận tốc và GPS
+│   └── test_purple_service_unification.py   # Kiểm thử tính nhất quán giữa API, SDK và Core Engine
 ├── scripts/
-│   ├── generate_per_vehicle_confusion_matrix.py # Sinh ma trận nhầm lẫn cho 34 xe
-│   ├── export_confusion_matrix_svg.py       # Xuất ảnh SVG và PNG cho các ma trận
-│   ├── evaluate_smooth_tracking.py          # Script tự động tính toán KPI và xuất báo cáo
-│   └── find_golden_candidates.py            # Công cụ trích xuất đoạn dữ liệu thực tế làm fixture
+│   ├── generate_per_vehicle_confusion_matrix.py # Script sinh ma trận nhầm lẫn cho 34 phương tiện
+│   ├── export_confusion_matrix_svg.py       # Script xuất đồ họa vector SVG chất lượng cao
+│   ├── evaluate_smooth_tracking.py          # Script đánh giá định lượng KPI bộ lọc
+│   └── find_golden_candidates.py            # Công cụ trích xuất đoạn tín hiệu mẫu từ dữ liệu thô
 ├── artifacts/
-│   └── evaluation/                          # Báo cáo KPI, metrics.json, report.md
-├── Dockerfile                               # Đóng gói Microservice chuẩn sản xuất
-├── docker-compose.yml                       # Khởi chạy 1-click kèm Redis
-└── requirements.txt                         # Danh sách thư viện phụ thuộc
+│   └── evaluation/                          # Kết quả đo lường KPI, metrics.json và báo cáo hiệu năng
+├── Dockerfile                               # Cấu hình container đóng gói Microservice
+├── docker-compose.yml                       # File điều phối khởi chạy hệ thống kèm Redis
+└── requirements.txt                         # Danh sách thư viện và gói phụ thuộc
 ```
 
 > **Lưu ý quan trọng cho kỹ sư tích hợp**:
@@ -677,7 +677,7 @@ Dự án trang bị một ứng dụng Dashboard trực quan hóa chuyên sâu b
 
 ```powershell
 # 1. Di chuyển vào thư mục dự án
-cd D:\THUCTAP_VICOMSAT
+cd THUCTAP-VICOMSAT-D1
 
 # 2. Tạo môi trường ảo cách ly
 python -m venv .venv
@@ -734,7 +734,7 @@ Hệ thống được đóng gói bằng Docker tối ưu theo chuẩn Microserv
 | `PORT` | `8000` | Cổng dịch vụ lắng nghe bên trong container. |
 | `DATABASE_URL` | `sqlite:////app/fuel_data/fuel_records.db` | Đường dẫn CSDL SQLite lưu lịch sử. |
 | `REQUIRE_API_KEY` | `false` | Bật/tắt chế độ bảo mật yêu cầu API Key ở Header. |
-| `API_KEY` | `vicomsat_secret_key_2026` | Mã khóa bảo mật nếu bật kiểm thực. |
+| `API_KEY` | `vcomsat_secret_key_2026` | Mã khóa bảo mật nếu bật kiểm thực. |
 | `STATE_BACKEND` | `memory` | Cơ chế lưu trữ state: `memory` (trong RAM) hoặc `redis`. |
 | `REDIS_URL` | `redis://redis:6379/0` | Địa chỉ máy chủ Redis khi dùng backend Redis. |
 | `STATE_TTL_SECONDS` | `259200` | Thời gian hết hạn giải phóng state xe (3 ngày). |

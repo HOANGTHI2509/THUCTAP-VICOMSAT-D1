@@ -21,13 +21,13 @@ from src.sdk.fuel_cleaner import FuelCleanerEngine
 logger = logging.getLogger("FuelAPI")
 
 # 1. Khởi tạo FastAPI App & Cấu hình bảo mật
-API_KEY = os.getenv("API_KEY", "vicomsat_secret_key_2026")
+API_KEY = os.getenv("API_KEY", "vcomsat_secret_key_2026")
 REQUIRE_API_KEY = os.getenv("REQUIRE_API_KEY", "false").lower() in ("true", "1", "yes")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./fuel_records.db")
 
 app = FastAPI(
-    title="VICOMSAT Real-time Fuel Denoising & Filtering API",
-    description="Microservice thời gian thực (Causal AI + Adaptive Kalman) khử nhiễu dữ liệu cảm biến nhiên liệu cho Vcomsat.",
+    title="VCOMSAT Real-time Fuel Denoising & Filtering API",
+    description="Microservice thời gian thực (Causal AI + Adaptive Kalman) khử nhiễu dữ liệu cảm biến nhiên liệu cho VCOMSAT.",
     version="1.0.0",
 )
 

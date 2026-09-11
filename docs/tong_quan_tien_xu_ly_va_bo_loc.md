@@ -1,11 +1,11 @@
-# BÁO CÁO TỔNG QUAN HỆ THỐNG TIỀN XỬ LÝ, BỘ LỌC VÀ AI LÀM SẠCH DỮ LIỆU NHIÊN LIỆU XE (VICOMSAT)
+# BÁO CÁO TỔNG QUAN HỆ THỐNG TIỀN XỬ LÝ, BỘ LỌC VÀ AI LÀM SẠCH DỮ LIỆU NHIÊN LIỆU XE (VCOMSAT)
 
 ---
 
 ## I. TỔNG QUAN DỰ ÁN VÀ THÀNH PHẦN TIỀN XỬ LÝ
 
 ### 1. Overview Dự án
-Hệ thống xử lý và phân tích dữ liệu nhiên liệu xe thông minh cho **VICOMSAT** nhằm mục đích làm sạch dữ liệu cảm biến nhiên liệu thực tế từ các xe tải/xe khách. Dữ liệu gốc thường bị ảnh hưởng nghiêm trọng bởi các loại nhiễu vật lý (sóng sánh nhiên liệu khi xe phanh/rẽ, mất tín hiệu GPS/GPRS, lỗi cảm biến về 0, sụt áp nguồn).
+Hệ thống xử lý và phân tích dữ liệu nhiên liệu xe thông minh cho **VCOMSAT** nhằm mục đích làm sạch dữ liệu cảm biến nhiên liệu thực tế từ các xe tải/xe khách. Dữ liệu gốc thường bị ảnh hưởng nghiêm trọng bởi các loại nhiễu vật lý (sóng sánh nhiên liệu khi xe phanh/rẽ, mất tín hiệu GPS/GPRS, lỗi cảm biến về 0, sụt áp nguồn).
 
 Hệ thống kết hợp 3 lớp xử lý chính:
 1. **Tiền xử lý thô (Data Preprocessing)**.

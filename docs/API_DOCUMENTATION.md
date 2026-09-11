@@ -1,4 +1,4 @@
-# VICOMSAT Topic 1 — Realtime Fuel Denoising API
+# VCOMSAT Topic 1 — Realtime Fuel Denoising API
 
 ## 1. Phạm vi
 

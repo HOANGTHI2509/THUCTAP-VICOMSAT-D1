@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # =====================================================================
-# VICOMSAT REALTIME FUEL CLEANING SERVICE (LINUX LAUNCHER)
+# VCOMSAT REALTIME FUEL CLEANING SERVICE (LINUX LAUNCHER)
 # =====================================================================
 
 set -e
 
 echo "====================================================================="
-echo "   VICOMSAT REALTIME FUEL CLEANING SERVICE (ENTERPRISE EDITION)"
+echo "   VCOMSAT REALTIME FUEL CLEANING SERVICE (ENTERPRISE EDITION)"
 echo "====================================================================="
 
 # 1. Kiểm tra Python

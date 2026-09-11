@@ -33,7 +33,7 @@ MODEL_DIRECTORY = str(PROJECT_ROOT / "models" / "fuel_state_classifier")
 FILTER_PIPELINE_VERSION = "smooth-tracking-origin-dev-1cbc895-v4"
 
 st.set_page_config(
-    page_title="VICOMSAT Fuel Denoising",
+    page_title="VCOMSAT Fuel Denoising",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",

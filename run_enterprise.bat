@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
-title VICOMSAT Fuel Denoising & Filtering Service - Enterprise Launcher
+title VCOMSAT Fuel Denoising & Filtering Service - Enterprise Launcher
 
 echo =====================================================================
-echo    VICOMSAT REALTIME FUEL CLEANING SERVICE (ENTERPRISE EDITION)
+echo    VCOMSAT REALTIME FUEL CLEANING SERVICE (ENTERPRISE EDITION)
 echo =====================================================================
 echo.
 
@@ -40,7 +40,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo =====================================================================
-echo [THÀNH CÔNG] KHỞI ĐỘNG HỆ THỐNG LỌC NHIÊN LIỆU AI VICOMSAT...
+echo [THÀNH CÔNG] KHỞI ĐỘNG HỆ THỐNG LỌC NHIÊN LIỆU AI VCOMSAT...
 echo =====================================================================
 echo - Tài liệu API tương tác (Swagger): http://localhost:8000/docs
 echo - Endpoint kiểm tra sức khỏe:      http://localhost:8000/api/v1/health
