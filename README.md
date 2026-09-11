@@ -885,34 +885,34 @@ Khi chụp ảnh màn hình từ hệ thống đang chạy cục bộ để bổ
 
 Chạy suite chính thức:
 
-`powershell
+```powershell
 .\.venv\Scripts\python.exe -m pytest -q tests
-`
+```
 
 Chạy nhóm trọng yếu đã xác minh sau thay đổi capacity/OperationalGuard:
 
-`powershell
-.\.venv\Scripts\python.exe -m pytest -q 
-  tests/test_smooth_tracking_noise_symmetry.py 
-  tests/test_dashboard_topic1.py 
-  tests/test_capacity_initialization.py 
-  tests/test_motion_quality_context.py 
-  tests/test_purple_service_unification.py 
-  tests/test_topic1_api_contract.py 
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q `
+  tests/test_smooth_tracking_noise_symmetry.py `
+  tests/test_dashboard_topic1.py `
+  tests/test_capacity_initialization.py `
+  tests/test_motion_quality_context.py `
+  tests/test_purple_service_unification.py `
+  tests/test_topic1_api_contract.py `
   tests/test_concurrent_streaming.py
-`
+```
 
 Kết quả gần nhất:
 
-`	ext
+```text
 Nhóm trọng yếu: 43 passed
 Toàn bộ tests/: 110 passed, 14 failed
-`
+```
 
 Các failure đang chờ review:
 
-1. Một test export history gọi loat(None) khi điểm chưa tạo được CleanFuel.
-2. Một số golden fixture truyền capacity_est_liters=200 trong khi RawFuel thực tế trên 400–500 L. Với semantics mới, đây là capacity KNOWN/REQUEST sai và physical clamp tạo kết quả 210 L.
+1. Một test export history gọi `float(None)` khi điểm chưa tạo được CleanFuel.
+2. Một số golden fixture truyền `capacity_est_liters=200` trong khi RawFuel thực tế trên 400–500 L. Với semantics mới, đây là capacity `KNOWN/REQUEST` sai và physical clamp tạo kết quả 210 L.
 3. Một số snapshot U/GPS lệch nhỏ sau OperationalGuard mới.
 
 Không cập nhật golden snapshot cho tới khi xác minh expected cũ hay output mới hợp lý hơn.
@@ -921,10 +921,10 @@ Không cập nhật golden snapshot cho tới khi xác minh expected cũ hay out
 
 1. **Causal ambiguity:** Một mức thấp kéo dài có thể là baseline thật hoặc sensor excursion. Không có future/ACC/IMU/flow meter thì không thể phân biệt tuyệt đối tại điểm đầu tiên.
 2. **Deep dropout policy:** Drop tức thời từ 70% baseline trở lên được giữ cho tới rebound hoặc reset. Đây là lựa chọn an toàn cho sensor-floor dropout nhưng có thể làm chậm một physical shift cực lớn thật sự.
-3. **Segment reset trong API:** Schema nhận segment_id, nhưng StreamingStateManager hiện bỏ qua trường này. Dashboard vẫn reset đúng theo segment.
+3. **Segment reset trong API:** Schema nhận `segment_id`, nhưng `StreamingStateManager` hiện bỏ qua trường này. Dashboard vẫn reset đúng theo segment.
 4. **Time-gap reset:** Giá trị code hiện tại đã được cập nhật là 30 phút (trước đây là 120 phút).
 5. **Redis operational state:** Serializer hiện lưu Kalman và history cơ bản nhưng chưa lưu đầy đủ các field excursion/recovery mới.
-6. **Capacity sai từ caller:** Request capacity hợp lệ về kiểu dữ liệu được coi là KNOWN. Nếu giá trị vật lý sai, clamp và threshold cũng sai.
+6. **Capacity sai từ caller:** Request capacity hợp lệ về kiểu dữ liệu được coi là `KNOWN`. Nếu giá trị vật lý sai, clamp và threshold cũng sai.
 7. **Không có Ground Truth tuyệt đối:** CleanFuel là ước lượng tín hiệu, không phải phép đo thể tích chuẩn phòng thí nghiệm.
 
 ## 20. Quy tắc đóng góp
