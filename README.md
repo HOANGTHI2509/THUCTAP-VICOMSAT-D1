@@ -1,3 +1,6 @@
+
+![Realtime Dashboard 1](docs/images/realtime_dashboard_1.png)
+![Realtime Dashboard 2](docs/images/realtime_dashboard_2.png)
 # VCOMSAT — Real-time Fuel Data Denoising & Filtering (Đề tài 1)
 
 > **Hệ thống xử lý nhiễu và lọc tín hiệu mức nhiên liệu viễn thông theo thời gian thực (Causal Filtering)**  
