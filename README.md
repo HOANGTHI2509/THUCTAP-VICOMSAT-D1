@@ -44,18 +44,44 @@ Hệ thống hoạt động theo nguyên lý **Causal Stream Processing**: mỗi
 ### 2.1. Sơ đồ luồng dữ liệu (Architecture Pipeline)
 
 ```mermaid
-flowchart LR
-    A["Thiết bị GPS & Cảm biến trên xe"] --> B["API Telemetry Gateway (/clean-point)"]
-    B --> C["Kiểm tra & Chuẩn hóa dữ liệu (Sanitization)"]
-    C --> D["Trích xuất đặc trưng Causal (Features Engine)"]
-    D --> E["Mô hình AI phân loại SignalState"]
-    D --> I["Đánh giá vận động MotionState (Speed + GPS)"]
-    E --> F["Lõi lọc thích ứng AI Smooth-Tracking (Adaptive Kalman)"]
-    I --> F
-    F --> G["CleanFuel (Đường tím)"]
-    F --> H["QualityFlag (Hành động lọc)"]
-    G --> J["Lưu CSDL / Microservice nghiệp vụ Đề tài 2"]
-    H --> J
+flowchart TD
+    %% Khối Nguồn Dữ Liệu
+    A["Thiết bị GPS & Cảm biến trên xe"] -->|REST / JSON Payload| B
+
+    %% Khối Tiếp nhận & Quản lý Luồng (API)
+    subgraph API_Layer ["1. API & Queue Layer"]
+        B["FastAPI Telemetry Gateway (/api/push)"]
+        B --> Q["Vehicle Queue Manager (Per-Vehicle Lock)"]
+    end
+
+    %% Khối Quản lý Trạng thái & Tiền xử lý
+    subgraph State_Layer ["2. State Management & Preprocessing"]
+        Q --> SM["StreamingStateManager"]
+        SM <-->|Đọc/Ghi Context (Kalman, Lịch sử)| DB[("In-Memory Storage (Sẵn sàng mở rộng lên Redis)")]
+        SM --> C["Kiểm tra & Chuẩn hóa (Sanitization)"]
+        C --> Cap["Dynamic Capacity Inference"]
+    end
+
+    %% Khối Cốt lõi: Xử lý Tín hiệu & AI
+    subgraph Engine_Layer ["3. AI & Signal Processing Engine"]
+        Cap --> D["Trích xuất đặc trưng Causal (Features Engine)"]
+        D --> I["Đánh giá vận động (MotionState)"]
+        D --> E["Mô hình AI Random Forest (SignalState)"]
+        
+        I --> F
+        E --> F["Lõi AI Smooth-Tracking (Adaptive Kalman)"]
+        F --> G_Guard["Operational Guard (Physical Clamp / Delay)"]
+    end
+
+    %% Khối Đầu ra
+    subgraph Output_Layer ["4. Output / Downstream"]
+        G_Guard --> Out_CF["CleanFuel (Đường tím)"]
+        G_Guard --> Out_QF["QualityFlag / SignalState"]
+        
+        Out_CF --> J["Microservice Đề tài 2 / Lưu DB"]
+        Out_QF --> J
+        Out_CF --> Dashboard["Live Dashboard (Streamlit/React)"]
+    end
 ```
 
 ### 2.2. Chi tiết chức năng 8 tầng xử lý
