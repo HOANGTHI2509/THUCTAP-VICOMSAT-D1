@@ -20,6 +20,12 @@ from src.sdk.fuel_cleaner import FuelCleanerEngine
 
 logger = logging.getLogger("FuelAPI")
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 # 1. Khởi tạo FastAPI App & Cấu hình bảo mật
 API_KEY = os.getenv("API_KEY", "vcomsat_secret_key_2026")
 REQUIRE_API_KEY = os.getenv("REQUIRE_API_KEY", "false").lower() in ("true", "1", "yes")

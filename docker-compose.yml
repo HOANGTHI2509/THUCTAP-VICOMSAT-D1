@@ -10,7 +10,7 @@ services:
     environment:
       DATABASE_URL: "${DATABASE_URL:-sqlite:////app/fuel_data/fuel_records.db}"
       REQUIRE_API_KEY: "${REQUIRE_API_KEY:-false}"
-      API_KEY: "${API_KEY:-vicomsat_secret_key_2026}"
+      API_KEY: "${API_KEY:-vcomsat_secret_key_2026}"
       STATE_BACKEND: "${STATE_BACKEND:-memory}"
       REDIS_URL: "${REDIS_URL:-redis://redis:6379/0}"
       STATE_TTL_SECONDS: "${STATE_TTL_SECONDS:-259200}"
