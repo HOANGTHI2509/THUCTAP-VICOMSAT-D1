@@ -190,7 +190,7 @@ Hệ thống xử lý từng điểm đo độc lập theo luồng JSON gửi l�
 5. **GPS nhảy cóc (GPS Glitch)**: Khi vận tốc xe báo `0.0 km/h` nhưng tọa độ GPS cách điểm trước > 100 mét chỉ trong vài giây, hệ thống xếp vào trạng thái `UNCERTAIN` và tăng hệ số thận trọng của bộ lọc.
 
 ### 5.3. Phân đoạn dữ liệu (Segmentation) & Reset State
-- **Quy tắc đứt quãng 30 phút**: Nếu khoảng cách thời gian giữa 2 bản tin liên tiếp $\Delta t > 120\text{ phút}$ (tham số `reset_gap_minutes = 120.0`), hệ thống xác định xe đã trải qua thời gian nghỉ dài không giám sát.
+- **Quy tắc đứt quãng 30 phút**: Nếu khoảng cách thời gian giữa 2 bản tin liên tiếp $\Delta t > 30\text{ phút}$ (tham số `reset_gap_minutes = 30.0`), hệ thống xác định xe đã trải qua thời gian nghỉ dài không giám sát.
 - **Hành vi Reset State**:
   - Xóa trắng bộ đệm lịch sử của xe.
   - Khởi tạo lại bộ lọc Kalman với giá trị đo mới: $x_0 = \text{RawFuel}$, $P_0 = 1.0$.
@@ -793,7 +793,7 @@ Toàn bộ tham số nghiệp vụ được định nghĩa tập trung tại fil
 | | `robust_trend_r` / `q` | `6.0` / `1.50` | — | Hệ số bám sát dốc tiêu hao thật. |
 | **Xác nhận Causal**| `upward_hold_steps` | `4` | Điểm | Số điểm cần để công nhận mức tăng mới. |
 | | `downward_confirm_points` | `3` | Điểm | Số điểm cần để công nhận mức sụt mới. |
-| **Đứt quãng** | `reset_gap_minutes` | `120.0` | Phút | Thời gian đứt tín hiệu để reset state. |
+| **Đứt quãng** | `reset_gap_minutes` | `30.0` | Phút | Thời gian đứt tín hiệu để reset state. |
 
 ---
 
