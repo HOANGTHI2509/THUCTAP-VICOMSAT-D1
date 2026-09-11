@@ -115,7 +115,7 @@ THUCTAP-VCOMSAT/
 │       └── csv/                             # Bảng ma trận nhầm lẫn dạng CSV từng xe
 ├── docs/                                    # Tài liệu thiết kế kỹ thuật và tài nguyên đồ họa
 │   ├── images/                              # Biểu đồ kỹ thuật và ma trận dạng vector SVG / PNG
-│   │   ├── cm_92H-03625.svg                 # Ma trận nhầm lẫn xe mẫu 92H-03625
+│   │   ├── cm_Car_5.svg                     # Ma trận nhầm lẫn xe đại diện Car 5
 │   │   ├── test_held_out_confusion_matrix.svg # Ma trận nhầm lẫn trên tập Test độc lập
 │   │   ├── overall_fleet_confusion_matrix.svg # Ma trận nhầm lẫn tổng hợp toàn bộ 34 xe
 │   │   ├── filter_comparison_visual.png     # Biểu đồ so sánh trực quan các phương pháp lọc
@@ -281,31 +281,31 @@ Tập kiểm thử độc lập bao gồm 23,486 mẫu tín hiệu thực tế h
 
 | Lớp tín hiệu (`SignalState`) | Precision | Recall | F1-Score | Số lượng mẫu (Support) |
 | :--- | :---: | :---: | :---: | :---: |
-| `UPWARD_SHIFT` (Dịch mức tăng) | 0.9655 | 0.7241 | **0.8276** | 116 |
-| `DOWNWARD_SHIFT` (Dịch mức giảm) | 0.9794 | 0.9140 | **0.9456** | 1,559 |
-| `GRADUAL_CHANGE` (Tiêu hao dốc) | 0.8683 | 0.9870 | **0.9239** | 3,849 |
-| `STABLE_JITTER` (Ổn định / Đỗ) | 0.9993 | 0.9771 | **0.9881** | 17,898 |
-| `OSCILLATION_NOISE` (Sóng sánh / Nhiễu) | 0.9412 | 1.0000 | **0.9697** | 64 |
-| **Độ chính xác toàn bộ tập Test** | — | — | **Accuracy: 97.33%** | **23,486** |
+| `UPWARD_SHIFT` (Dịch mức tăng) | 0.94 | 1.00 | **0.97** | 64 |
+| `DOWNWARD_SHIFT` (Dịch mức giảm) | 0.97 | 0.72 | **0.83** | 116 |
+| `GRADUAL_CHANGE` (Tiêu hao dốc) | 0.98 | 0.91 | **0.94** | 1,526 |
+| `STABLE_JITTER` (Ổn định / Đỗ) | 1.00 | 0.98 | **0.99** | 17,928 |
+| `OSCILLATION_NOISE` (Sóng sánh / Nhiễu) | 0.87 | 0.99 | **0.92** | 3,849 |
+| **Độ chính xác toàn bộ tập Test** | — | — | **Accuracy: 97.33%** | **23,483** |
 
 ---
 
-### 8.2. Ma trận nhầm lẫn thực tế trên xe đại diện: 92H-03625
+### 8.2. Ma trận nhầm lẫn thực tế trên xe đại diện: Car 5 (Đầy đủ 5 trạng thái)
 
-Xe `92H-03625` (Dung tích 550 Lít) là mẫu xe vận tải đường dài với 4,653 điểm dữ liệu thực tế:
+Xe `Car 5` (13,698 mẫu) là mẫu phương tiện vận tải có chu trình vận hành phức tạp và đầy đủ nhất: di chuyển đường trường rung lắc mạnh, có các đợt nạp nhiên liệu thật (`UPWARD_SHIFT`), sụt mức đột ngột (`DOWNWARD_SHIFT`), tiêu hao dốc liên tục và đỗ nổ máy:
 
-![Ma trận nhầm lẫn xe 92H-03625](docs/images/cm_92H-03625.svg)
-*Hình: Ma trận nhầm lẫn định dạng Vector SVG của xe 92H-03625 (Accuracy đạt 99.96%).*
+![Ma trận nhầm lẫn xe Car 5](docs/images/cm_Car_5.svg)
+*Hình: Ma trận nhầm lẫn định dạng Vector SVG của xe Car 5 (Độ chính xác thực tế đạt 95.58%).*
 
-#### Chi tiết bảng ma trận nhầm lẫn xe 92H-03625:
+#### Chi tiết bảng ma trận nhầm lẫn xe Car 5:
 | Thực tế \ Dự đoán | UPWARD_SHIFT | DOWNWARD_SHIFT | GRADUAL_CHANGE | STABLE_JITTER | OSCILLATION_NOISE | Tổng mẫu thực tế | Độ chính xác |
 |:---|---:|---:|---:|---:|---:|---:|:---:|
-| **UPWARD_SHIFT** | 0 | 0 | 0 | 0 | 0 | 0 | — |
-| **DOWNWARD_SHIFT** | 0 | 0 | 0 | 0 | 0 | 0 | — |
-| **GRADUAL_CHANGE** | 0 | 0 | **110** | 0 | 0 | 110 | **100.00%** |
-| **STABLE_JITTER** | 0 | 0 | 0 | **4,531** | 2 | 4,533 | **99.96%** |
-| **OSCILLATION_NOISE** | 0 | 0 | 0 | 0 | **10** | 10 | **100.00%** |
-| **Tổng dự đoán** | 0 | 0 | 110 | 4,531 | 12 | **4,653** | **99.96%** |
+| **UPWARD_SHIFT** | **62** | 0 | 0 | 0 | 0 | 62 | **100.00%** |
+| **DOWNWARD_SHIFT** | 0 | **84** | 0 | 0 | 32 | 116 | **72.41%** |
+| **GRADUAL_CHANGE** | 0 | 0 | **577** | 0 | 132 | 709 | **81.38%** |
+| **STABLE_JITTER** | 0 | 0 | 0 | **8,679** | 392 | 9,071 | **95.68%** |
+| **OSCILLATION_NOISE** | 4 | 3 | 30 | 13 | **3,690** | 3,740 | **98.66%** |
+| **Tổng dự đoán** | 66 | 87 | 607 | 8,692 | 4,246 | **13,698** | **95.58%** |
 
 ---
 
@@ -841,7 +841,7 @@ Nhằm đảm bảo tài liệu bàn giao đạt tính trực quan cao nhất ch
 |:---:|:---|:---|:---:|:---|
 | 1 | **Mục 1.2** (Giới thiệu bài toán) | `docs/images/filter_comparison_visual.png` | PNG | So sánh trực quan dữ liệu thô (`RawFuel`) và các đường lọc làm mượt, làm nổi bật đường tím thích ứng (`CleanFuel`). |
 | 2 | **Mục 8.1** (Mô hình AI) | `docs/images/test_held_out_confusion_matrix.svg` | Vector SVG | Ma trận nhầm lẫn 5x5 trên tập kiểm thử độc lập 3 xe Unseen (23,486 mẫu, Accuracy 97.33%, không vỡ hạt). |
-| 3 | **Mục 8.2** (Mô hình AI) | `docs/images/cm_92H-03625.svg` | Vector SVG | Ma trận nhầm lẫn chi tiết của xe đại diện `92H-03625` (4,653 mẫu, Accuracy 99.96%). |
+| 3 | **Mục 8.2** (Mô hình AI) | `docs/images/cm_Car_5.svg` | Vector SVG | Ma trận nhầm lẫn chi tiết của xe đại diện `Car 5` (13,698 mẫu, Accuracy 95.58%). |
 | 4 | **Mục 9.3** (Thuật toán Smooth-Tracking) | `docs/images/adaptive_kalman_behavior.png` | PNG | Biểu đồ thích ứng động của các hệ số Kalman ($Q$, $R$, Kalman Gain) theo các trạng thái vận hành. |
 
 ---
