@@ -26,24 +26,52 @@ KNOWN_CAPACITIES = {
     "35H-09245": 400.0,
     "90H-03494": 600.0,
     "92H-03625": 200.0,
+    "Car 1": 370.0,
+    "Car 2": 200.0,
+    "Car 3": 360.0,
+    "Car 4": 370.0,
+    "Car 5": 600.0,
 }
 
 
-def available_vehicle_sources(data_directory: Path) -> dict[str, Path]:
-    """Return telemetry files (CSV or Excel) keyed by their vehicle identifier."""
-    if not data_directory.is_dir():
-        return {}
-    sources = {}
-    files = sorted(list(data_directory.glob("*.csv")) + list(data_directory.glob("*.xlsx")))
-    for path in files:
-        key = path.stem.replace("_processed", "").replace("_da_gop", "")
-        sources[key] = path
+def available_vehicle_sources(data_source: Path | str) -> dict[str, str | Path]:
+    """Return telemetry files or Excel sheets keyed by their vehicle identifier."""
+    sources: dict[str, str | Path] = {}
+    source_str = str(data_source)
+
+    if source_str == "ALL_RAW":
+        p_full = Path("fulltt")
+        if p_full.is_dir():
+            for p in sorted(list(p_full.glob("*.csv")) + list(p_full.glob("*.xlsx"))):
+                sources[p.stem.replace("_processed", "").replace("_da_gop", "")] = p
+        p_car = Path("Thunghiem5/CarFuelHistory.xlsx")
+        if p_car.is_file():
+            xl = pd.ExcelFile(p_car)
+            for sheet in xl.sheet_names:
+                sources[f"{sheet} (CarFuelHistory)"] = f"{p_car}::{sheet}"
+        return sources
+
+    path = Path(data_source)
+    if path.is_file() and path.suffix.lower() in (".xlsx", ".xls"):
+        xl = pd.ExcelFile(path)
+        for sheet in xl.sheet_names:
+            sources[sheet] = f"{path}::{sheet}"
+        return sources
+
+    if path.is_dir():
+        for p in sorted(list(path.glob("*.csv")) + list(path.glob("*.xlsx"))):
+            sources[p.stem.replace("_processed", "").replace("_da_gop", "")] = p
+
     return sources
 
 
-def load_telemetry_csv(file_path: Path) -> pd.DataFrame:
+def load_telemetry_csv(file_path: Path | str) -> pd.DataFrame:
     """Load one vehicle telemetry file (CSV or Excel) and normalize fields."""
-    if str(file_path).lower().endswith((".xlsx", ".xls")):
+    file_str = str(file_path)
+    if "::" in file_str:
+        file_part, sheet_part = file_str.split("::", 1)
+        frame = pd.read_excel(file_part, sheet_name=sheet_part)
+    elif file_str.lower().endswith((".xlsx", ".xls")):
         frame = pd.read_excel(file_path)
     else:
         frame = pd.read_csv(file_path)
@@ -213,6 +241,24 @@ def _predict_causal_states_batch(
         except Exception:
             # The realtime engine falls back to STABLE_JITTER on model errors.
             pass
+
+    # Post-hoc causal directional guard cho GRADUAL_CHANGE:
+    # Neu model doan nham OSCILLATION_NOISE nhung tin hieu trong cua so truoc do giam 1 chieu lien tuc
+    # (directionality >= 0.55, net_change am ro ret, khong co dao chieu manh),
+    # thi day la GRADUAL_CHANGE (tieu hao xe chay), khong phai song dao dong 2 chieu.
+    fuel_vals = frame["FuelLevel"].values
+    n_points = len(frame)
+    min_drop = max(1.2, 0.005 * context.capacity_est)
+    for idx in range(5, n_points):
+        if states[idx] == "OSCILLATION_NOISE":
+            win = fuel_vals[max(0, idx - 5) : idx + 1]
+            deltas = np.diff(win)
+            total_var = float(np.sum(np.abs(deltas)))
+            net_change = float(win[-1] - win[0])
+            dir_ratio = abs(net_change) / total_var if total_var > 1e-5 else 0.0
+            if net_change <= -min_drop and dir_ratio >= 0.55:
+                if not any(d > 2.0 for d in deltas):
+                    states[idx] = "GRADUAL_CHANGE"
 
     return pd.Series(states, index=frame.index, dtype="object")
 

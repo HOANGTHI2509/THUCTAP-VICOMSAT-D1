@@ -82,8 +82,8 @@ def smooth_kalman_update(
 
     if is_moving and difference > 0:
         compressed = min(max(0.4, jitter * 0.25), difference)
-    elif (is_moving or trend.robust_downtrend) and difference < 0:
-        if downward_supported and (window.directional_down or trend.robust_downtrend):
+    elif (is_moving or trend.robust_downtrend or downward_supported) and difference < 0:
+        if downward_supported and (window.directional_down or trend.robust_downtrend or ai_state == "GRADUAL_CHANGE"):
             compressed = difference
         else:
             compressed = max(-max(1.5, jitter * 1.2), difference)
@@ -92,7 +92,7 @@ def smooth_kalman_update(
         compressed = shrink_threshold * math.tanh(difference / shrink_threshold)
 
     kalman_step = gain * compressed
-    if (is_moving and window.directional_down) or trend.robust_downtrend:
+    if (is_moving and window.directional_down) or trend.robust_downtrend or (downward_supported and ai_state == "GRADUAL_CHANGE"):
         kalman_step = max(-max(2.5, jitter * 1.8), kalman_step)
     context.kalman_x = float(context.kalman_x) + kalman_step
     context.kalman_p = (1.0 - gain) * predicted_covariance

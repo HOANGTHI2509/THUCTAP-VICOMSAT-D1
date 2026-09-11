@@ -25,11 +25,12 @@ from src.dashboard.dashboard_data import (  # noqa: E402
 
 DATASET_CHOICES = {
     "fulltt (Dữ liệu thô chưa xử lý - 9 xe)": PROJECT_ROOT / "fulltt",
-    "TienXuLy (Dữ liệu đã tiền xử lý - 28 xe)": PROJECT_ROOT / "TienXuLy",
+    "CarFuelHistory (Bộ 5 xe - Thunghiem5)": PROJECT_ROOT / "Thunghiem5" / "CarFuelHistory.xlsx",
+    "Toàn bộ dữ liệu thô (14 xe: fulltt + CarFuelHistory)": "ALL_RAW",
 }
 DATA_DIRECTORY = Path(os.getenv("FUEL_DATA_DIRECTORY", PROJECT_ROOT / "fulltt"))
 MODEL_DIRECTORY = str(PROJECT_ROOT / "models" / "fuel_state_classifier")
-FILTER_PIPELINE_VERSION = "smooth-tracking-origin-dev-1cbc895-v3"
+FILTER_PIPELINE_VERSION = "smooth-tracking-origin-dev-1cbc895-v4"
 
 st.set_page_config(
     page_title="VICOMSAT Fuel Denoising",
@@ -48,7 +49,7 @@ st.caption(
 @st.cache_data(show_spinner=False)
 def _load_source(file_path: str, modified_at_ns: int):
     del modified_at_ns
-    return load_telemetry_csv(Path(file_path))
+    return load_telemetry_csv(file_path)
 
 
 @st.cache_data(show_spinner=False)
@@ -85,7 +86,13 @@ with st.sidebar:
     vehicle_id = st.selectbox("🚚 Chọn xe", list(sources))
 
 source_path = sources[vehicle_id]
-frame = _load_source(str(source_path), source_path.stat().st_mtime_ns)
+if isinstance(source_path, str) and "::" in source_path:
+    real_path = Path(source_path.split("::")[0])
+    mtime = real_path.stat().st_mtime_ns
+else:
+    real_path = Path(source_path)
+    mtime = real_path.stat().st_mtime_ns
+frame = _load_source(str(source_path), mtime)
 if frame.empty:
     st.warning("File telemetry không có điểm hợp lệ.")
     st.stop()

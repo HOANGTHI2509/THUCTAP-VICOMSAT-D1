@@ -162,8 +162,9 @@ class CausalFeatureExtractor:
             else 0.0
         )
         target = mean_level + slope * (len(values) - 1 - mean_index)
+        has_moving = any(value > self.config.moving_speed_kmh for value in speeds)
         robust_downtrend = (
-            moving_ratio >= 0.5
+            (moving_ratio >= 0.15 or has_moving)
             and level_drop >= max(2.0, jitter * 1.25)
             and slope <= -max(0.2, jitter * 0.12)
         )
