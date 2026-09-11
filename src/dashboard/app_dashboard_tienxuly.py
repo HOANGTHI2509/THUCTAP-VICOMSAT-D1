@@ -41,8 +41,7 @@ st.set_page_config(
 
 st.title("📈 Dashboard lọc nhiễu nhiên liệu — Đề tài 1")
 st.caption(
-    "Đường tím là CleanFuel causal theo thời gian thực. Dashboard không kết luận "
-    "nạp/rút, đỗ hay tắt máy."
+    "AI Smooth-Tracking khử nhiễu và làm mượt theo thời gian thực. Dashboard không kết luận nạp/rút, đỗ hay tắt máy."
 )
 
 
@@ -146,16 +145,12 @@ if visible.empty:
     st.stop()
 
 latest = visible.iloc[-1]
-metric_columns = st.columns(6)
+metric_columns = st.columns(5)
 metric_columns[0].metric("Bản ghi", f"{len(visible):,}")
 metric_columns[1].metric("RawFuel", f"{latest['FuelLevel']:.1f} L")
-metric_columns[2].metric("CleanFuel (tím)", f"{latest['CleanFuel']:.1f} L")
-if "Kalman_Adaptive" in latest and not pd.isna(latest["Kalman_Adaptive"]):
-    metric_columns[3].metric("Kalman Adaptive", f"{latest['Kalman_Adaptive']:.1f} L")
-else:
-    metric_columns[3].metric("Kalman Adaptive", "N/A")
-metric_columns[4].metric("SignalState", str(latest["SignalState"]))
-metric_columns[5].metric("QualityFlag", str(latest["QualityFlag"]))
+metric_columns[2].metric("AI Smooth-Tracking", f"{latest['CleanFuel']:.1f} L")
+metric_columns[3].metric("SignalState", str(latest["SignalState"]))
+metric_columns[4].metric("QualityFlag", str(latest["QualityFlag"]))
 
 fig = make_subplots(
     rows=3,
@@ -163,7 +158,7 @@ fig = make_subplots(
     shared_xaxes=True,
     vertical_spacing=0.06,
     subplot_titles=(
-        "1. RawFuel, CleanFuel (Smooth-Tracking) và Kalman Adaptive",
+        "1. RawFuel và AI Smooth-Tracking",
         "2. Tốc độ di chuyển",
         "3. Độ nhiễu cục bộ (Rolling Std)",
     ),
@@ -192,36 +187,19 @@ for segment_number, (_, plot_segment) in enumerate(
             x=plot_segment["FuelTime"],
             y=plot_segment["CleanFuel"],
             mode="lines",
-            name="CleanFuel (tím)",
-            legendgroup="clean-fuel",
+            name="AI Smooth-Tracking",
+            legendgroup="ai-smooth-tracking",
             showlegend=show_legend,
             line={"color": "#AB63FA", "width": 2.8},
             customdata=plot_segment[["SignalState", "QualityFlag", "MotionState"]],
             hovertemplate=(
-                "%{x}<br>CleanFuel: %{y:.2f} L<br>SignalState: %{customdata[0]}"
+                "%{x}<br>AI Smooth-Tracking: %{y:.2f} L<br>SignalState: %{customdata[0]}"
                 "<br>QualityFlag: %{customdata[1]}<br>MotionState: %{customdata[2]}<extra></extra>"
             ),
         ),
         row=1,
         col=1,
     )
-    if "Kalman_Adaptive" in plot_segment.columns:
-        fig.add_trace(
-            go.Scatter(
-                x=plot_segment["FuelTime"],
-                y=plot_segment["Kalman_Adaptive"],
-                mode="lines",
-                name="Kalman Adaptive (xanh)",
-                legendgroup="kalman-adaptive",
-                showlegend=show_legend,
-                line={"color": "#00CC96", "width": 2.2, "dash": "solid"},
-                hovertemplate=(
-                    "%{x}<br>Kalman Adaptive: %{y:.2f} L<extra></extra>"
-                ),
-            ),
-            row=1,
-            col=1,
-        )
     fig.add_trace(
         go.Scatter(
             x=plot_segment["FuelTime"],
@@ -269,7 +247,6 @@ with st.expander("🔎 Data Inspector — trạng thái lọc từng điểm", e
         "FuelTime",
         "FuelLevel",
         "CleanFuel",
-        "Kalman_Adaptive",
         "Speed",
         "SignalState",
         "QualityFlag",

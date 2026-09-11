@@ -657,7 +657,7 @@ Dự án trang bị một ứng dụng Dashboard trực quan hóa chuyên sâu b
   2. **Bộ 5 xe `CarFuelHistory`**: `Car 1`, `Car 2`, `Car 3`, `Car 4`, `Car 5` với đầy đủ các phân đoạn hành trình đa dạng.
 - Dashboard hiển thị đồng thời:
   - **Đường màu đỏ**: Dữ liệu thô từ cảm biến (`RawFuel`).
-  - **Đường màu tím**: Dữ liệu đã qua lọc (`CleanFuel`).
+  - **Đường màu tím**: Dữ liệu đã khử nhiễu làm mượt (`AI Smooth-Tracking`).
   - **Biểu đồ vận tốc và độ lệch chuẩn**: Theo dõi đồng bộ trạng thái xe.
   - **Bảng Data Inspector**: So sánh từng dòng dữ liệu và xem lý do ra quyết định (`QualityFlag`).
 - **Khóa cấu hình Q/R**: Dashboard không cho phép can thiệp chỉnh sửa tham số Q/R trực tiếp trên giao diện nhằm đảm bảo kết quả kiểm thử luôn luôn tái lập được (Reproducibility).

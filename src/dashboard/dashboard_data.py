@@ -313,9 +313,4 @@ def run_topic1_filter(
         .transform(lambda values: values.rolling(12, min_periods=2).std(ddof=0))
         .fillna(0.0)
     )
-    from src.core.filters.ai_enhanced_adaptive_realtime import chay_kalman_thich_nghi_1d
-
-    result["Kalman_Adaptive"] = chay_kalman_thich_nghi_1d(
-        result, capacity=capacity_est_liters
-    )
     return result
