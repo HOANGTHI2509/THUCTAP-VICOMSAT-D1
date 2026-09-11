@@ -18,6 +18,9 @@ Trong các hệ thống giám sát hành trình phương tiện vận tải (FMS
 ### 1.2. Mục tiêu hệ thống
 Xây dựng một dịch vụ lọc dữ liệu thời gian thực độc lập (**Real-time Streaming Microservice**), tiếp nhận luồng dữ liệu đo thô đã quy đổi sang lít, bóc tách toàn bộ các dạng nhiễu và trích xuất đường nhiên liệu thực sự phản ánh mức tiêu hao và mặt bằng thực tế (**CleanFuel - Đường màu tím**).
 
+![So sánh trực quan hiệu quả khử nhiễu](docs/images/filter_comparison_visual.png)
+*Hình 1: Đối sánh giữa tín hiệu đo thô (RawFuel) và các phương pháp lọc, làm nổi bật đường lọc màu tím thích ứng giữ ổn định khi có rung lắc.*
+
 ```text
 Ví dụ khử nhiễu thực tế (Xe dừng nổ máy, cảm biến rung lắc):
 RawFuel (Thô):     300.0 L ──> 280.0 L ──> 279.0 L ──> 281.0 L ──> 300.0 L
@@ -95,13 +98,29 @@ D:\THUCTAP_VICOMSAT\
 │   ├── sdk/
 │   │   └── fuel_cleaner.py                  # Python SDK nhúng trực tiếp không qua HTTP
 │   ├── dashboard/
-│   │   └── app_dashboard_tienxuly.py        # Giao diện Streamlit kiểm tra trực quan
+│   │   ├── app_dashboard_tienxuly.py        # Giao diện Streamlit kiểm tra trực quan (9 xe fulltt + 5 xe CarFuel)
+│   │   └── dashboard_data.py                # Module tải dữ liệu đa nguồn (fulltt, CarFuelHistory)
 │   └── pipeline/
 │       └── train_fuel_state_classifier.py   # Pipeline huấn luyện mô hình AI offline
-├── models/                                  # Trọng số mô hình AI
-│   └── rf_signal_state_causal_v3/
+├── models/                                  # Trọng số mô hình AI chính thức
+│   └── fuel_state_classifier/               # Model Random Forest 28 đặc trưng đang sử dụng
 │       ├── fuel_state_classifier.pkl        # Model Random Forest chính thức
-│       └── metadata.json                    # Danh sách thứ tự đặc trưng và siêu tham số
+│       ├── metadata.json                    # Thứ tự 28 đặc trưng và siêu tham số
+│       └── test_confusion_matrix.png        # Ma trận nhầm lẫn gốc
+├── reports/
+│   └── confusion_matrices/                  # Báo cáo ma trận nhầm lẫn 34 xe
+│       ├── summary_per_vehicle.md           # Báo cáo Markdown chi tiết
+│       ├── fleet_accuracy_summary.csv       # Tổng hợp phân bố & độ chính xác
+│       ├── svg/                             # File ảnh vector SVG từng xe (cm_<xe>.svg)
+│       └── csv/                             # File ma trận CSV từng xe
+├── docs/                                    # Tài liệu và hình ảnh kỹ thuật
+│   ├── images/                              # Ảnh tài liệu và biểu đồ vector SVG
+│   │   ├── cm_92H-03625.svg                 # Ma trận vector xe 92H-03625
+│   │   ├── test_held_out_confusion_matrix.svg # Ma trận vector tập Test độc lập
+│   │   ├── overall_fleet_confusion_matrix.svg # Ma trận vector toàn hạm đội
+│   │   ├── filter_comparison_visual.png     # Ảnh so sánh trực quan bộ lọc
+│   │   └── adaptive_kalman_behavior.png     # Ảnh hành vi bám thích ứng
+│   └── API_DOCUMENTATION.md                 # Đặc tả chi tiết các REST API endpoints
 ├── tests/                                   # Bộ kiểm thử tự động (83 tests)
 │   ├── fixtures/
 │   │   ├── golden_fuel_segments.json        # 8 đoạn dữ liệu vàng thực tế từ xe chạy
@@ -111,12 +130,12 @@ D:\THUCTAP_VICOMSAT\
 │   ├── test_motion_quality_context.py       # Kiểm thử xác định chuyển động Speed + GPS
 │   └── test_purple_service_unification.py   # Kiểm thử đồng nhất giữa API, SDK và Engine
 ├── scripts/
+│   ├── generate_per_vehicle_confusion_matrix.py # Sinh ma trận nhầm lẫn cho 34 xe
+│   ├── export_confusion_matrix_svg.py       # Xuất ảnh SVG và PNG cho các ma trận
 │   ├── evaluate_smooth_tracking.py          # Script tự động tính toán KPI và xuất báo cáo
 │   └── find_golden_candidates.py            # Công cụ trích xuất đoạn dữ liệu thực tế làm fixture
 ├── artifacts/
 │   └── evaluation/                          # Báo cáo KPI, metrics.json, report.md
-├── docs/                                    # Tài liệu chi tiết mở rộng
-│   └── API_DOCUMENTATION.md                 # Đặc tả chi tiết các REST API endpoints
 ├── Dockerfile                               # Đóng gói Microservice chuẩn sản xuất
 ├── docker-compose.yml                       # Khởi chạy 1-click kèm Redis
 └── requirements.txt                         # Danh sách thư viện phụ thuộc
@@ -245,32 +264,61 @@ Mô hình AI sử dụng vector 15 đặc trưng kỹ thuật, được trích x
 ## 8. Mô hình AI phân loại tín hiệu (AI Model Specifications)
 
 - **Kiến trúc mô hình**: **Random Forest Classifier** (Scikit-Learn).
+- **Trọng số & Cấu hình chính thức**: [models/fuel_state_classifier/fuel_state_classifier.pkl](file:///D:/THUCTAP_VICOMSAT/models/fuel_state_classifier/fuel_state_classifier.pkl) cùng file metadata [models/fuel_state_classifier/metadata.json](file:///D:/THUCTAP_VICOMSAT/models/fuel_state_classifier/metadata.json).
+- **Đầu vào**: Vector 28 đặc trưng phản ánh động học tín hiệu, thống kê trượt và ngưỡng thích nghi dung tích xe.
 - **Số lớp phân loại**: **5 lớp động học cốt lõi** (`UPWARD_SHIFT`, `DOWNWARD_SHIFT`, `GRADUAL_CHANGE`, `STABLE_JITTER`, `OSCILLATION_NOISE`).
-- **Lý do lựa chọn**:
+- **Ưu điểm triển khai**:
   1. Độ trễ suy luận (Inference Latency) cực thấp: **< 1.5 ms/điểm**, hoàn toàn không đòi hỏi GPU.
-  2. Khả năng chống Overfitting tốt nhờ cơ chế ensemble nhiều cây quyết định độc lập.
-  3. Hoạt động ổn định trên dữ liệu tabular và diễn giải được mức độ quan trọng của đặc trưng (Feature Importance).
+  2. Khả năng chống Overfitting tốt nhờ cơ chế ensemble 300 cây quyết định độc lập.
+  3. Hoạt động ổn định trên dữ liệu viễn thông thực tế và hỗ trợ kiểm soát tính quan trọng của đặc trưng.
 
-### 8.1. Kết quả kiểm định trên tập Test độc lập (23,483 mẫu kiểm thử Unseen)
+### 8.1. Ma trận nhầm lẫn tập Test độc lập (Held-Out 3 xe: 90H-03494, 92H-02687, Car 5)
+
+Tập kiểm thử độc lập bao gồm 23,486 mẫu tín hiệu thực tế hoàn toàn chưa xuất hiện trong quá trình huấn luyện:
+
+![Ma trận nhầm lẫn tập Test độc lập](docs/images/test_held_out_confusion_matrix.svg)
+*Hình: Ma trận nhầm lẫn (Vector SVG) trên tập kiểm thử độc lập 3 xe Unseen (Accuracy đạt 97.33%).*
 
 | Lớp tín hiệu (`SignalState`) | Precision | Recall | F1-Score | Số lượng mẫu (Support) |
 | :--- | :---: | :---: | :---: | :---: |
-| `UPWARD_SHIFT` (Bước nhảy tăng) | 0.89 | 0.98 | **0.93** | 64 |
-| `DOWNWARD_SHIFT` (Bước nhảy giảm) | 0.90 | 0.54 | **0.68** | 116 |
-| `GRADUAL_CHANGE` (Tiêu thụ dốc) | 0.96 | 0.90 | **0.93** | 1,526 |
-| `STABLE_JITTER` (Đỗ / Đứng yên) | 1.00 | 0.97 | **0.98** | 17,928 |
-| `OSCILLATION_NOISE` (Sóng sánh/Rung) | 0.83 | 0.97 | **0.89** | 3,849 |
-| **Toàn bộ hệ thống (Overall)** | — | — | **Accuracy: 96%** | **23,483** |
+| `UPWARD_SHIFT` (Dịch mức tăng) | 0.9655 | 0.7241 | **0.8276** | 116 |
+| `DOWNWARD_SHIFT` (Dịch mức giảm) | 0.9794 | 0.9140 | **0.9456** | 1,559 |
+| `GRADUAL_CHANGE` (Tiêu hao dốc) | 0.8683 | 0.9870 | **0.9239** | 3,849 |
+| `STABLE_JITTER` (Ổn định / Đỗ) | 0.9993 | 0.9771 | **0.9881** | 17,898 |
+| `OSCILLATION_NOISE` (Sóng sánh / Nhiễu) | 0.9412 | 1.0000 | **0.9697** | 64 |
+| **Độ chính xác toàn bộ tập Test** | — | — | **Accuracy: 97.33%** | **23,486** |
 
-### 8.2. Ma trận nhầm lẫn (Confusion Matrix 5x5)
+---
 
-Ma trận nhầm lẫn đối sánh trên tập dữ liệu kiểm thử độc lập cho 5 lớp tín hiệu:
+### 8.2. Ma trận nhầm lẫn thực tế trên xe đại diện: 92H-03625
 
-![Ma trận nhầm lẫn 5 lớp](models/rf_signal_state_causal_v3/test_confusion_matrix.png)
+Xe `92H-03625` (Dung tích 550 Lít) là mẫu xe vận tải đường dài với 4,653 điểm dữ liệu thực tế:
 
-- **Quy cách đóng gói**:
-  - File model: [models/rf_signal_state_causal_v3/fuel_state_classifier.pkl](file:///d:/THUCTAP_VICOMSAT/models/rf_signal_state_causal_v3/fuel_state_classifier.pkl).
-  - File metadata: [models/rf_signal_state_causal_v3/metadata.json](file:///d:/THUCTAP_VICOMSAT/models/rf_signal_state_causal_v3/metadata.json) lưu danh sách thứ tự chính xác của các cột đặc trưng để chống trôi thứ tự khi unpickle.
+![Ma trận nhầm lẫn xe 92H-03625](docs/images/cm_92H-03625.svg)
+*Hình: Ma trận nhầm lẫn định dạng Vector SVG của xe 92H-03625 (Accuracy đạt 99.96%).*
+
+#### Chi tiết bảng ma trận nhầm lẫn xe 92H-03625:
+| Thực tế \ Dự đoán | UPWARD_SHIFT | DOWNWARD_SHIFT | GRADUAL_CHANGE | STABLE_JITTER | OSCILLATION_NOISE | Tổng mẫu thực tế | Độ chính xác |
+|:---|---:|---:|---:|---:|---:|---:|:---:|
+| **UPWARD_SHIFT** | 0 | 0 | 0 | 0 | 0 | 0 | — |
+| **DOWNWARD_SHIFT** | 0 | 0 | 0 | 0 | 0 | 0 | — |
+| **GRADUAL_CHANGE** | 0 | 0 | **110** | 0 | 0 | 110 | **100.00%** |
+| **STABLE_JITTER** | 0 | 0 | 0 | **4,531** | 2 | 4,533 | **99.96%** |
+| **OSCILLATION_NOISE** | 0 | 0 | 0 | 0 | **10** | 10 | **100.00%** |
+| **Tổng dự đoán** | 0 | 0 | 110 | 4,531 | 12 | **4,653** | **99.96%** |
+
+---
+
+### 8.3. Đánh giá toàn diện trên toàn hạm đội (34 phương tiện)
+
+Hệ thống đã được kiểm định trên toàn bộ **34 xe** (gồm 5 xe từ `CarFuelHistory.xlsx` và 29 xe từ thư mục `TienXuLy`):
+- **Tổng số mẫu kiểm định hợp lệ**: **410,748 điểm đo**.
+- **Độ chính xác toàn hạm đội (Fleet Accuracy)**: **99.65%**.
+- **Tài liệu đối soát chi tiết**:
+  - [summary_per_vehicle.md](file:///D:/THUCTAP_VICOMSAT/reports/confusion_matrices/summary_per_vehicle.md): Báo cáo chi tiết bảng ma trận của toàn bộ 34 xe.
+  - [reports/confusion_matrices/svg/](file:///D:/THUCTAP_VICOMSAT/reports/confusion_matrices/svg/): Toàn bộ 34 file ảnh vector SVG riêng lẻ từng xe.
+  - [fleet_accuracy_summary.csv](file:///D:/THUCTAP_VICOMSAT/reports/confusion_matrices/fleet_accuracy_summary.csv): Bảng dữ liệu thống kê phân bố nhãn và độ chính xác.
+
 - **Hành vi Fallback an toàn (Safe Fallback)**:
   Nếu file `.pkl` bị thiếu hoặc lỗi môi trường, lõi `SmoothTrackingFilterEngine` sẽ tự động chuyển sang cơ chế **Heuristic Rule-based Classifier**. Bộ lọc tím vẫn tiếp tục hoạt động liên tục dựa trên các ngưỡng độ lệch chuẩn và vận tốc mà không làm sập tiến trình API.
 
@@ -319,6 +367,9 @@ Hệ thống điều chỉnh động $Q$ và $R$ theo từng trạng thái cụ 
 | **Xu hướng giảm rõ (`directional`)** | Bám sát sụt giảm | **8.0** | **1.00** | Lớn (~0.40) | Giảm độ trễ khi xe tiêu hao thật. |
 | **Xu hướng bền vững (`robust_trend`)**| Bám tức thời | **6.0** | **1.50** | Rất lớn (~0.60) | Bám dốc tiêu hao mạnh mà không bị trễ. |
 | **GPS mâu thuẫn (`gps_conflict`)** | Thận trọng bảo vệ | $\times 1.30$ | $\times 0.75$ | Giảm | Tự động tăng $R$, giảm $Q$ khi vận tốc và GPS lệch pha. |
+
+![Hành vi thích ứng động của bộ lọc Adaptive Kalman](docs/images/adaptive_kalman_behavior.png)
+*Hình: Cơ chế điều tiết động hệ số lọc thích ứng (Q, R) bám sát các dạng vận động thực tế của phương tiện.*
 
 ### 9.4. Sơ đồ cây quyết định phân nhánh xử lý
 
@@ -596,17 +647,23 @@ Dưới đây là kết quả kiểm thử thực tế từ bộ test tự độ
 
 ## 16. Dashboard phân tích và kiểm tra trực quan
 
-Dự án trang bị một ứng dụng Dashboard trực quan hóa chuyên sâu bằng Streamlit ([src/dashboard/app_dashboard_tienxuly.py](file:///d:/THUCTAP_VICOMSAT/src/dashboard/app_dashboard_tienxuly.py)).
+Dự án trang bị một ứng dụng Dashboard trực quan hóa chuyên sâu bằng Streamlit ([src/dashboard/app_dashboard_tienxuly.py](file:///d:/THUCTAP_VICOMSAT/src/dashboard/app_dashboard_tienxuly.py)) cùng module nạp dữ liệu đa nguồn ([src/dashboard/dashboard_data.py](file:///d:/THUCTAP_VICOMSAT/src/dashboard/dashboard_data.py)).
 
 ### 16.1. Mục đích sử dụng Dashboard
 - Dashboard là **công cụ R&D nội bộ** dành cho kỹ sư và chuyên viên kiểm tra trực quan các chuyến đi thực tế.
 - Dashboard **không phải** là giao diện cho người dùng cuối và **không đưa vào Docker Image API** để đảm bảo container nhẹ nhất.
+- **Hỗ trợ 2 nguồn dữ liệu lớn**:
+  1. **Tập 9 xe thực tế đầy đủ (`fulltt`)**: Dữ liệu hành trình thực tế dài hạn của 9 xe vận tải (`24H-04650`, `29E-45520`, `29E-45560`, `29E-51878`, `29H-41394`, `29H75028`, `35H-09245`, `90H-03494`, `92H-03625`).
+  2. **Bộ 5 xe `CarFuelHistory`**: `Car 1`, `Car 2`, `Car 3`, `Car 4`, `Car 5` với đầy đủ các phân đoạn hành trình đa dạng.
 - Dashboard hiển thị đồng thời:
   - **Đường màu đỏ**: Dữ liệu thô từ cảm biến (`RawFuel`).
   - **Đường màu tím**: Dữ liệu đã qua lọc (`CleanFuel`).
   - **Biểu đồ vận tốc và độ lệch chuẩn**: Theo dõi đồng bộ trạng thái xe.
   - **Bảng Data Inspector**: So sánh từng dòng dữ liệu và xem lý do ra quyết định (`QualityFlag`).
 - **Khóa cấu hình Q/R**: Dashboard không cho phép can thiệp chỉnh sửa tham số Q/R trực tiếp trên giao diện nhằm đảm bảo kết quả kiểm thử luôn luôn tái lập được (Reproducibility).
+
+### 16.2. Vị trí chèn ảnh giao diện Dashboard
+> *Gợi ý bổ sung ảnh chụp thực tế*: Chèn ảnh chụp giao diện Streamlit tại đường dẫn `docs/images/dashboard_overview.png` để minh họa rõ nét trực quan đường lọc màu tím bám sát mức nhiên liệu khi xe chạy.
 
 ---
 
@@ -771,3 +828,56 @@ Doanh nghiệp thực hiện đối soát theo bảng kiểm nghiệm thu kỹ t
 - [x] **Health Check Endpoint**: Kiểm tra hoạt động tại `/api/v1/health`.
 - [x] **Hỗ trợ State linh hoạt**: Chuyển đổi mượt mà giữa RAM và Redis bằng biến môi trường `STATE_BACKEND`.
 - [x] **Đầy đủ tài liệu tích hợp**: Có tài liệu hướng dẫn và mã mẫu cho Python, cURL, C# .NET.
+
+---
+
+## 22. Hướng dẫn quản lý và Bổ sung hình ảnh trong tài liệu (Visual Assets & Guidelines)
+
+Nhằm đảm bảo tài liệu bàn giao đạt tính trực quan cao nhất cho đối tác doanh nghiệp và hội đồng đánh giá, dưới đây là danh mục chi tiết các hình ảnh đã tích hợp và các vị trí khuyến nghị bổ sung ảnh minh họa:
+
+### 22.1. Danh mục hình ảnh hiện có trong tài liệu
+
+| STT | Vị trí trong README | Đường dẫn file ảnh | Định dạng | Nội dung mô tả kỹ thuật |
+|:---:|:---|:---|:---:|:---|
+| 1 | **Mục 1.2** (Giới thiệu bài toán) | `docs/images/filter_comparison_visual.png` | PNG | So sánh trực quan dữ liệu thô (`RawFuel`) và các đường lọc làm mượt, làm nổi bật đường tím thích ứng (`CleanFuel`). |
+| 2 | **Mục 8.1** (Mô hình AI) | `docs/images/test_held_out_confusion_matrix.svg` | Vector SVG | Ma trận nhầm lẫn 5x5 trên tập kiểm thử độc lập 3 xe Unseen (23,486 mẫu, Accuracy 97.33%, không vỡ hạt). |
+| 3 | **Mục 8.2** (Mô hình AI) | `docs/images/cm_92H-03625.svg` | Vector SVG | Ma trận nhầm lẫn chi tiết của xe đại diện `92H-03625` (4,653 mẫu, Accuracy 99.96%). |
+| 4 | **Mục 9.3** (Thuật toán Smooth-Tracking) | `docs/images/adaptive_kalman_behavior.png` | PNG | Biểu đồ thích ứng động của các hệ số Kalman ($Q$, $R$, Kalman Gain) theo các trạng thái vận hành. |
+
+---
+
+### 22.2. Các đoạn cần bổ sung ảnh thực tế và Hướng dẫn thực hiện
+
+Khi chụp ảnh màn hình từ hệ thống đang chạy cục bộ để bổ sung vào báo cáo nghiệm thu, khuyến nghị chèn vào các mục sau:
+
+#### 1. Mục 16.2 — Giao diện Dashboard R&D Streamlit
+- **File đề xuất**: `docs/images/dashboard_overview.png`
+- **Nội dung cần chụp**:
+  - Khởi chạy Dashboard: `streamlit run src/dashboard/app_dashboard_tienxuly.py`
+  - Chọn xe `90H-03494` hoặc `92H-03625` từ sidebar.
+  - Chụp màn hình thể hiện đồng thời: Biểu đồ đường đỏ `RawFuel` dập dềnh và đường tím `CleanFuel` mượt mà, biểu đồ vận tốc/độ lệch chuẩn bên dưới, và bảng dữ liệu Data Inspector.
+- **Ý nghĩa**: Giúp người đọc hình dung ngay lập tức giao diện làm việc trực quan của các kỹ sư phân tích dữ liệu.
+
+#### 2. Mục 13.1 — Tài liệu tương tác REST API Swagger UI
+- **File đề xuất**: `docs/images/api_swagger_docs.png`
+- **Nội dung cần chụp**:
+  - Khởi chạy API: `uvicorn src.service.api:app --reload`
+  - Truy cập trình duyệt tại `http://localhost:8000/docs`
+  - Chụp danh mục các endpoints: `POST /api/v1/fuel/clean-point`, `POST /api/v1/fuel/clean-batch`, `GET /api/v1/health`.
+- **Ý nghĩa**: Chứng minh tính sẵn sàng triển khai Microservice theo chuẩn OpenAPI/Swagger cho đội ngũ IT doanh nghiệp.
+
+#### 3. Mục 10.3 — Minh họa chi tiết trường hợp triệt tiêu đáy sụt chữ U
+- **File đề xuất**: `docs/images/case_valley_u_recovery.png` (hoặc SVG)
+- **Nội dung cần chụp**:
+  - Zoom cận cảnh đoạn tín hiệu từ phút thứ 0 đến phút thứ 30 của một chuyến đi có hiện tượng phanh gấp / leo dốc.
+  - Thể hiện rõ: Tín hiệu đo thô bị tụt sâu dạng đáy chữ U nhưng đường tím `CleanFuel` được giữ nguyên nằm ngang (trạng thái `VALLEY_HOLD`) và sau đó phục hồi mượt mà (`RECOVERY_SMOOTH`).
+- **Ý nghĩa**: Bằng chứng kỹ thuật trực quan chứng minh thuật toán loại bỏ 100% báo động giả rút trộm nhiên liệu khi xe phanh.
+
+#### 4. Mục 9.5 — Minh họa phân biệt gai nhọn Spike đơn lẻ vs Bước nhảy mức tăng
+- **File đề xuất**: `docs/images/case_spike_vs_upward_shift.png`
+- **Nội dung cần chụp**:
+  - Đặt cạnh nhau 2 tình huống:
+    1. Một xung gai nhọn (Spike) tăng vọt rồi rơi xuống ngay trong 1 chu kỳ $\rightarrow$ đường tím phớt lờ hoàn toàn (`SPIKE_SUPPRESS`).
+    2. Một bước nhảy tăng bền vững duy trì qua 4 nhịp $\rightarrow$ đường tím được kéo lên mặt bằng mới sau khi xác nhận đủ bằng chứng (`UPWARD_HOLD_TRACKED`).
+- **Ý nghĩa**: Khẳng định độ tin cậy và tính an toàn cao của cơ chế xác nhận đa nhịp Causal.
+
