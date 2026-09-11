@@ -58,6 +58,7 @@ class AISmoothTrackingFilter:
                 capacity_est=float(calibrated or 0.0),
                 capacity_known=known,
                 capacity_mode="KNOWN_CAPACITY" if known else "UNKNOWN_CAPACITY_MODE",
+                capacity_warning=None if known else "CAPACITY_NOT_CALIBRATED",
             )
         return self.contexts[vehicle_id]
 
@@ -88,15 +89,21 @@ class AISmoothTrackingFilter:
             return None if value is None else round(float(value), digits)
 
         return {
+            "VehicleID": context.vehicle_id, "SegmentID": context.segment_id,
             "clean_fuel": round(clean_fuel, 2), "fuel_rate": round(fuel_rate, 4),
             "is_stopped": 1 if speed <= self.config.stopped_speed_kmh else 0,
             "ai_state": normalize_signal_state(ai_state), "signal_state": normalize_signal_state(ai_state),
             "quality_flag": normalize_quality_flag(quality_flag), "motion_state": motion.state,
             "motion_confidence": round(motion.confidence, 3), "gps_displacement_meters": round(motion.gps_displacement_meters, 2),
             "OperationalState": operational_state or context.operational_state,
+            "ModelState": normalize_signal_state(ai_state),
+            "ModelProbabilities": json.dumps({normalize_signal_state(ai_state): round(context.classifier_probability, 6)}),
             "StableBaseline": rounded(context.stable_baseline, 3),
+            "ExcursionActive": bool(context.excursion_active),
+            "ExcursionDirection": context.excursion_direction,
             "ExcursionBaseline": rounded(context.excursion_baseline, 3),
             "ExcursionMin": rounded(context.excursion_min, 3), "ExcursionMax": rounded(context.excursion_max, 3),
+            "ExcursionElapsedMin": rounded(context.excursion_elapsed_min, 3),
             "DeviationPct": rounded((context.last_raw_fuel - context.stable_baseline) / context.capacity_est if context.last_raw_fuel is not None and context.stable_baseline is not None else 0.0, 6),
             "ExpectedFuelRate": rounded(context.last_expected_rate, 5), "ObservedFuelRate": rounded(context.last_observed_rate, 5),
             "RateResidual": rounded(context.last_rate_residual, 5), "ReboundRatio": rounded(context.rebound_ratio, 4),
@@ -105,10 +112,23 @@ class AISmoothTrackingFilter:
             "KalmanQ": rounded(context.last_kalman_q, 4), "KalmanR": rounded(context.last_kalman_r, 4),
             "CleanFuel": round(clean_fuel, 2),
             "CapacityMode": context.capacity_mode,
+            "CapacityWarning": context.capacity_warning,
             "CapacityEstimate": rounded(context.capacity_est, 3),
             "RobustNoise": rounded(context.robust_noise, 4),
             "InnovationGated": bool(context.innovation_gated),
+            "Innovation": rounded(context.innovation, 4),
+            "InnovationScore": rounded(context.innovation_score, 4),
             "ShadowFuel": rounded(context.shadow_fuel, 3),
+            "RecoveryActive": bool(context.recovery_active),
+            "TrendActive": bool(context.trend_active),
+            "TrendDirection": context.trend_direction,
+            "TrendConfidence": rounded(context.trend_confidence, 4),
+            "TrendSamples": context.trend_samples,
+            "TrendElapsedMin": rounded(context.trend_elapsed_min, 3),
+            "TrendNetChangePct": rounded(context.trend_net_change_pct, 6),
+            "TrendDirectionality": rounded(context.trend_directionality_ema, 4),
+            "TrendEscapeTriggered": bool(context.trend_escape_triggered),
+            "TransitionProgress": rounded(context.transition_progress, 4),
         }
 
     def _resolve_ai_state(self, context: VehicleFilterContext, raw_fuel: float, speed: float, dt_minutes: float, known_ai_state: Optional[str], motion: MotionEvidence, known_probability: Optional[float]) -> Tuple[str, float]:
@@ -154,6 +174,7 @@ class AISmoothTrackingFilter:
             if context.capacity_known and initial > context.capacity_est * self.config.inferred_capacity_headroom:
                 context.capacity_known = False
                 context.capacity_mode = "UNKNOWN_CAPACITY_MODE"
+                context.capacity_warning = "DECLARED_CAPACITY_BELOW_RAW"
             if not context.capacity_known:
                 context.capacity_est = max(self.config.minimum_capacity, initial * 1.25)
             context.last_clean_fuel = initial; context.kalman_x = initial; context.kalman_p = 1.0
@@ -167,6 +188,7 @@ class AISmoothTrackingFilter:
         if context.capacity_known and raw > context.capacity_est * self.config.inferred_capacity_headroom:
             context.capacity_known = False
             context.capacity_mode = "UNKNOWN_CAPACITY_MODE"
+            context.capacity_warning = "DECLARED_CAPACITY_BELOW_RAW"
             context.capacity_est = raw * 1.25
         elif not context.capacity_known and raw > context.capacity_est:
             context.capacity_est = raw * 1.25
@@ -181,12 +203,12 @@ class AISmoothTrackingFilter:
         jitter = max(self.config.jitter_floor, self.config.jitter_capacity_ratio * context.capacity_est)
         window = self.feature_extractor.window_evidence(context, raw, jitter)
         trend = self.feature_extractor.trend_evidence(context, raw, speed, jitter)
-        decision = self.guard.evaluate(context, raw, speed, dt_minutes, ai_state, probability, motion, window, trend)
+        decision = self.guard.evaluate(context, raw, speed, dt_minutes, ai_state, probability, motion, window, trend, timestamp)
         context.classifier_probability = probability
         context.last_expected_rate = decision.expected_rate; context.last_observed_rate = decision.observed_rate
         context.last_rate_residual = decision.rate_residual
         clean = adaptive_kalman_update(context, decision.target, dt_minutes, decision.q, decision.r, self.config)
-        if decision.state == "GRADUAL_TRACKING":
+        if decision.state in ("GRADUAL_TRACKING", "PERSISTENT_TREND_ESCAPE"):
             step_scale = context.capacity_est if context.capacity_known else max(abs(float(context.last_clean_fuel)), self.config.minimum_capacity)
             step_pct = self.config.gradual_max_step_pct if context.capacity_known else self.config.unknown_gradual_max_step_pct
             max_step = step_pct * step_scale
@@ -195,7 +217,7 @@ class AISmoothTrackingFilter:
             clean = max(lower, min(upper, clean))
             context.kalman_x = clean
         elif decision.state in ("DOWNWARD_CONFIRMED", "UPWARD_CONFIRMED"):
-            fraction = min(1.0, context.confirmed_ramp_step / max(1, self.config.confirmed_tracking_samples - 1))
+            fraction = context.transition_progress
             step_pct = self.config.confirmed_step_start_pct + fraction * (
                 self.config.confirmed_step_end_pct - self.config.confirmed_step_start_pct
             )

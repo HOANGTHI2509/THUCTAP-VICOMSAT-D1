@@ -62,13 +62,18 @@ def filter_smooth_tracking_dataframe(
     motion_confidences = []
     gps_displacements = []
     debug_columns = (
-        "OperationalState", "StableBaseline", "ExcursionBaseline",
-        "ExcursionMin", "ExcursionMax", "DeviationPct", "ExpectedFuelRate",
+        "VehicleID", "SegmentID", "ModelState", "ModelProbabilities",
+        "OperationalState", "StableBaseline", "ExcursionActive", "ExcursionDirection",
+        "ExcursionBaseline", "ExcursionMin", "ExcursionMax", "ExcursionElapsedMin",
+        "DeviationPct", "ExpectedFuelRate",
         "ObservedFuelRate", "RateResidual", "ReboundRatio", "PullbackRatio",
         "PendingSamples", "PendingElapsedMin", "GuardActive", "KalmanQ",
         "KalmanR", "CleanFuel",
-        "CapacityMode", "CapacityEstimate", "RobustNoise",
-        "InnovationGated", "ShadowFuel",
+        "CapacityMode", "CapacityWarning", "CapacityEstimate", "RobustNoise",
+        "Innovation", "InnovationScore", "InnovationGated", "ShadowFuel",
+        "RecoveryActive", "TrendActive", "TrendDirection", "TrendConfidence",
+        "TrendSamples", "TrendElapsedMin", "TrendNetChangePct",
+        "TrendDirectionality", "TrendEscapeTriggered", "TransitionProgress",
     )
     diagnostics = {column: [] for column in debug_columns}
 

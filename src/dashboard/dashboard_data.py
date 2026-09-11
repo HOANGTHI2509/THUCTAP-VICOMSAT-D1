@@ -226,7 +226,11 @@ def run_topic1_filter(
     if frame.empty:
         return frame.copy()
 
-    engine = AISmoothTrackingFilter(model_dir=model_dir)
+    # Keep classifier feature memory separate from the published filter memory.
+    # Otherwise a full-segment classifier prepass would pre-populate online fuel-rate
+    # profiles with future samples before the first CleanFuel output is emitted.
+    classifier_engine = AISmoothTrackingFilter(model_dir=model_dir)
+    filter_engine = AISmoothTrackingFilter(model_dir="")
     parts: list[pd.DataFrame] = []
     for segment_id, segment in frame.groupby("SegmentID", sort=False, dropna=False):
         segment = segment.sort_values("FuelTime", kind="stable").copy()
@@ -235,7 +239,7 @@ def run_topic1_filter(
         )
         predicted_states = _predict_causal_states_batch(
             segment,
-            engine,
+            classifier_engine,
             vehicle_id=f"{vehicle_id}:{segment_id}:features",
             capacity_est_liters=capacity_est_liters,
         )
@@ -246,7 +250,7 @@ def run_topic1_filter(
             segment,
             vehicle_id=vehicle_id,
             capacity_est=capacity_est_liters,
-            filter_engine=engine,
+            filter_engine=filter_engine,
         )
         parts.append(filtered)
 
