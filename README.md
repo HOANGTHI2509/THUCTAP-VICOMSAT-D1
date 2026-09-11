@@ -779,8 +779,7 @@ Toàn bộ tham số nghiệp vụ được định nghĩa tập trung tại fil
 
 | Nhóm tham số | Tên tham số | Giá trị chuẩn | Đơn vị | Ý nghĩa |
 | :--- | :--- | :---: | :---: | :--- |
-| **Dung tích** | `default_capacity` | `200.0` | Lít | Dung tích mặc định khi xe chưa có bảng calib. |
-| | `minimum_capacity` | `30.0` | Lít | Giới hạn dung tích tối thiểu hợp lệ. |
+| **Dung tích** | `minimum_capacity` | `30.0` | Lít | Giới hạn dung tích tối thiểu hợp lệ. |
 | **Vận động** | `stopped_speed_kmh` | `0.5` | km/h | Dưới ngưỡng này xem như xe đã dừng. |
 | | `moving_speed_kmh` | `5.0` | km/h | Vượt ngưỡng này xem như xe đang chạy chắc chắn. |
 | | `low_motion_radius_meters` | `30.0` | Mét | Bán kính trôi dạt GPS khi đỗ. |
@@ -925,11 +924,4 @@ Không cập nhật golden snapshot cho tới khi xác minh expected cũ hay out
 4. **Time-gap reset:** Giá trị code hiện tại đã được cập nhật là 30 phút (trước đây là 120 phút).
 5. **Redis operational state:** Serializer hiện lưu Kalman và history cơ bản nhưng chưa lưu đầy đủ các field excursion/recovery mới.
 6. **Capacity sai từ caller:** Request capacity hợp lệ về kiểu dữ liệu được coi là `KNOWN`. Nếu giá trị vật lý sai, clamp và threshold cũng sai.
-7. **Không có Ground Truth tuyệt đối:** CleanFuel là ước lượng tín hiệu, không phải phép đo thể tích chuẩn phòng thí nghiệm.
-
-## 20. Quy tắc đóng góp
-
-- Không retrain RF hoặc sửa Ground Truth trong một thay đổi operational nếu chưa có yêu cầu và review riêng.
-- Mọi thay đổi filter phải có test causal và replay dữ liệu liên quan.
-- Không cập nhật snapshot chỉ để làm test xanh.
-- Ghi rõ thay đổi contract/state schema và hướng dẫn reset state khi deploy.\n
+7. **Không có Ground Truth tuyệt đối:** CleanFuel là ước lượng tín hiệu, không phải phép đo thể tích chuẩn phòng thí nghiệm.\n
