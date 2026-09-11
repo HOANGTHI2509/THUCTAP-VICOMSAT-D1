@@ -13,7 +13,7 @@ class SmoothTrackingConfig:
     initial_fuel_fallback: Optional[float] = None
     capacity_headroom: float = 1.02
     inferred_capacity_headroom: float = 1.05
-    reset_gap_minutes: float = 120.0
+    reset_gap_minutes: float = 30.0
     nominal_period_minutes: float = 2.0
     stopped_speed_kmh: float = 0.5
     parked_speed_kmh: float = 1.0
