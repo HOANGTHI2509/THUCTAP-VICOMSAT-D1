@@ -16,19 +16,38 @@ from src.core.filters.smooth_tracking.state import VehicleFilterContext
 REQUIRED_COLUMNS = ("FuelTime", "FuelLevel")
 
 
+KNOWN_CAPACITIES = {
+    "24H-04650": 800.0,
+    "29E-45520": 200.0,
+    "29E-45560": 200.0,
+    "29E-51878": 200.0,
+    "29H-41394": 350.0,
+    "29H75028": 100.0,
+    "35H-09245": 400.0,
+    "90H-03494": 600.0,
+    "92H-03625": 200.0,
+}
+
+
 def available_vehicle_sources(data_directory: Path) -> dict[str, Path]:
-    """Return processed telemetry CSV files keyed by their vehicle identifier."""
+    """Return telemetry files (CSV or Excel) keyed by their vehicle identifier."""
     if not data_directory.is_dir():
         return {}
-    return {
-        path.name.removesuffix("_processed.csv"): path
-        for path in sorted(data_directory.glob("*_processed.csv"))
-    }
+    sources = {}
+    files = sorted(list(data_directory.glob("*.csv")) + list(data_directory.glob("*.xlsx")))
+    for path in files:
+        key = path.stem.replace("_processed", "").replace("_da_gop", "")
+        sources[key] = path
+    return sources
 
 
 def load_telemetry_csv(file_path: Path) -> pd.DataFrame:
-    """Load one processed vehicle file and normalize fields required by Topic 1."""
-    frame = pd.read_csv(file_path)
+    """Load one vehicle telemetry file (CSV or Excel) and normalize fields."""
+    if str(file_path).lower().endswith((".xlsx", ".xls")):
+        frame = pd.read_excel(file_path)
+    else:
+        frame = pd.read_csv(file_path)
+
     missing = [column for column in REQUIRED_COLUMNS if column not in frame.columns]
     if missing:
         raise ValueError(f"Missing required telemetry columns: {', '.join(missing)}")
@@ -43,23 +62,38 @@ def load_telemetry_csv(file_path: Path) -> pd.DataFrame:
         if "MotionSpeed" in frame.columns
         else pd.Series(0.0, index=frame.index)
     )
-    segment_source = (
-        frame["SegmentID"]
-        if "SegmentID" in frame.columns
-        else pd.Series(0, index=frame.index)
-    )
     frame["Speed"] = pd.to_numeric(speed_source, errors="coerce").fillna(0.0)
-    frame["SegmentID"] = pd.to_numeric(segment_source, errors="coerce").fillna(0)
+
+    frame = frame.dropna(subset=["FuelTime"]).sort_values("FuelTime", kind="stable")
+
+    # Tự động chia segment nếu file thô chưa có SegmentID (cắt segment khi mất tín hiệu > 30 phút)
+    if "SegmentID" in frame.columns:
+        frame["SegmentID"] = pd.to_numeric(frame["SegmentID"], errors="coerce").fillna(0).astype(int)
+    else:
+        dt_gap_s = frame["FuelTime"].diff().dt.total_seconds().fillna(0.0)
+        frame["SegmentID"] = (dt_gap_s > 1800.0).cumsum().astype(int) + 1
+
     for column in ("Lat", "Lng"):
         if column in frame.columns:
+            if frame[column].dtype == object:
+                frame[column] = frame[column].astype(str).str.replace(",", ".")
             frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    return frame.dropna(subset=["FuelTime"]).sort_values(
-        ["SegmentID", "FuelTime"], kind="stable"
-    )
+
+    # Tu dong hoan doi Lat va Lng neu nguon du lieu bi dao cot (Lat ~ 105 do E, Lng ~ 21 do N)
+    if "Lat" in frame.columns and "Lng" in frame.columns:
+        lat_valid = frame["Lat"].dropna()
+        lng_valid = frame["Lng"].dropna()
+        if not lat_valid.empty and not lng_valid.empty:
+            if lat_valid.median() > 50.0 and lng_valid.median() < 50.0:
+                frame["Lat"], frame["Lng"] = frame["Lng"].copy(), frame["Lat"].copy()
+
+    return frame.sort_values(["SegmentID", "FuelTime"], kind="stable")
 
 
-def estimate_capacity_liters(frame: pd.DataFrame) -> float:
+def estimate_capacity_liters(frame: pd.DataFrame, vehicle_id: str = "") -> float:
     """Estimate a safe threshold scale when calibration capacity is unavailable."""
+    if vehicle_id and vehicle_id in KNOWN_CAPACITIES:
+        return KNOWN_CAPACITIES[vehicle_id]
     fuel = pd.to_numeric(frame["FuelLevel"], errors="coerce")
     fuel = fuel[(fuel > 0) & fuel.notna()]
     if fuel.empty:
@@ -232,5 +266,10 @@ def run_topic1_filter(
         result.groupby("SegmentID", dropna=False)["FuelLevel"]
         .transform(lambda values: values.rolling(12, min_periods=2).std(ddof=0))
         .fillna(0.0)
+    )
+    from src.core.filters.ai_enhanced_adaptive_realtime import chay_kalman_thich_nghi_1d
+
+    result["Kalman_Adaptive"] = chay_kalman_thich_nghi_1d(
+        result, capacity=capacity_est_liters
     )
     return result

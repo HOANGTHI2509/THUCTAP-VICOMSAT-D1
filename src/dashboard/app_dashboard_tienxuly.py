@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
@@ -22,9 +23,13 @@ from src.dashboard.dashboard_data import (  # noqa: E402
 )
 
 
-DATA_DIRECTORY = Path(os.getenv("FUEL_DATA_DIRECTORY", PROJECT_ROOT / "TienXuLy"))
+DATASET_CHOICES = {
+    "fulltt (Dữ liệu thô chưa xử lý - 9 xe)": PROJECT_ROOT / "fulltt",
+    "TienXuLy (Dữ liệu đã tiền xử lý - 28 xe)": PROJECT_ROOT / "TienXuLy",
+}
+DATA_DIRECTORY = Path(os.getenv("FUEL_DATA_DIRECTORY", PROJECT_ROOT / "fulltt"))
 MODEL_DIRECTORY = str(PROJECT_ROOT / "models" / "fuel_state_classifier")
-FILTER_PIPELINE_VERSION = "smooth-tracking-origin-dev-1cbc895"
+FILTER_PIPELINE_VERSION = "smooth-tracking-origin-dev-1cbc895-v3"
 
 st.set_page_config(
     page_title="VICOMSAT Fuel Denoising",
@@ -32,6 +37,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
 st.title("📈 Dashboard lọc nhiễu nhiên liệu — Đề tài 1")
 st.caption(
     "Đường tím là CleanFuel causal theo thời gian thực. Dashboard không kết luận "
@@ -61,16 +67,21 @@ def _filter_source(
     )
 
 
+with st.sidebar:
+    st.header("⚙️ Dữ liệu")
+    selected_dataset = st.radio(
+        "📁 Nguồn dữ liệu",
+        list(DATASET_CHOICES.keys()),
+        index=0,  # Mặc định fulltt
+    )
+    DATA_DIRECTORY = DATASET_CHOICES[selected_dataset]
+
 sources = available_vehicle_sources(DATA_DIRECTORY)
 if not sources:
-    st.warning(
-        "Chưa có CSV telemetry. Gắn thư mục `TienXuLy` vào container tại "
-        "`/app/TienXuLy`, hoặc đặt `FUEL_DATA_DIRECTORY` tới thư mục dữ liệu."
-    )
+    st.warning(f"Chưa có dữ liệu trong `{DATA_DIRECTORY}`.")
     st.stop()
 
 with st.sidebar:
-    st.header("⚙️ Dữ liệu")
     vehicle_id = st.selectbox("🚚 Chọn xe", list(sources))
 
 source_path = sources[vehicle_id]
@@ -97,11 +108,11 @@ scope = frame.copy()
 if selected_segment != "Tất cả phân đoạn":
     scope = scope[scope["SegmentID"].astype(str) == selected_segment].copy()
 
-capacity_est_liters = estimate_capacity_liters(scope)
+capacity_est_liters = estimate_capacity_liters(scope, vehicle_id=vehicle_id)
 with st.sidebar:
     st.markdown("---")
     st.caption(
-        f"CapacityEst tạm: {capacity_est_liters:.1f} L. "
+        f"Capacity: {capacity_est_liters:.1f} L. "
         "Q/R dùng cấu hình versioned của Smooth-Tracking."
     )
     st.caption("Muốn đổi Q/R phải cập nhật config và chạy golden/KPI, không chỉnh trên dashboard.")
@@ -113,6 +124,7 @@ with st.spinner("Đang chạy Smooth-Tracking causal…"):
         capacity_est_liters,
         FILTER_PIPELINE_VERSION,
     )
+
 
 if isinstance(date_range, (tuple, list)) and len(date_range) == 2:
     start_date, end_date = date_range
@@ -127,12 +139,16 @@ if visible.empty:
     st.stop()
 
 latest = visible.iloc[-1]
-metric_columns = st.columns(5)
+metric_columns = st.columns(6)
 metric_columns[0].metric("Bản ghi", f"{len(visible):,}")
 metric_columns[1].metric("RawFuel", f"{latest['FuelLevel']:.1f} L")
-metric_columns[2].metric("CleanFuel", f"{latest['CleanFuel']:.1f} L")
-metric_columns[3].metric("SignalState", str(latest["SignalState"]))
-metric_columns[4].metric("QualityFlag", str(latest["QualityFlag"]))
+metric_columns[2].metric("CleanFuel (tím)", f"{latest['CleanFuel']:.1f} L")
+if "Kalman_Adaptive" in latest and not pd.isna(latest["Kalman_Adaptive"]):
+    metric_columns[3].metric("Kalman Adaptive", f"{latest['Kalman_Adaptive']:.1f} L")
+else:
+    metric_columns[3].metric("Kalman Adaptive", "N/A")
+metric_columns[4].metric("SignalState", str(latest["SignalState"]))
+metric_columns[5].metric("QualityFlag", str(latest["QualityFlag"]))
 
 fig = make_subplots(
     rows=3,
@@ -140,7 +156,7 @@ fig = make_subplots(
     shared_xaxes=True,
     vertical_spacing=0.06,
     subplot_titles=(
-        "1. RawFuel và CleanFuel (Smooth-Tracking)",
+        "1. RawFuel, CleanFuel (Smooth-Tracking) và Kalman Adaptive",
         "2. Tốc độ di chuyển",
         "3. Độ nhiễu cục bộ (Rolling Std)",
     ),
@@ -182,6 +198,23 @@ for segment_number, (_, plot_segment) in enumerate(
         row=1,
         col=1,
     )
+    if "Kalman_Adaptive" in plot_segment.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=plot_segment["FuelTime"],
+                y=plot_segment["Kalman_Adaptive"],
+                mode="lines",
+                name="Kalman Adaptive (xanh)",
+                legendgroup="kalman-adaptive",
+                showlegend=show_legend,
+                line={"color": "#00CC96", "width": 2.2, "dash": "solid"},
+                hovertemplate=(
+                    "%{x}<br>Kalman Adaptive: %{y:.2f} L<extra></extra>"
+                ),
+            ),
+            row=1,
+            col=1,
+        )
     fig.add_trace(
         go.Scatter(
             x=plot_segment["FuelTime"],
@@ -229,6 +262,7 @@ with st.expander("🔎 Data Inspector — trạng thái lọc từng điểm", e
         "FuelTime",
         "FuelLevel",
         "CleanFuel",
+        "Kalman_Adaptive",
         "Speed",
         "SignalState",
         "QualityFlag",
