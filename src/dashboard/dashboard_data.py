@@ -16,24 +16,6 @@ from src.core.filters.smooth_tracking.state import VehicleFilterContext
 REQUIRED_COLUMNS = ("FuelTime", "FuelLevel")
 
 
-KNOWN_CAPACITIES = {
-    "24H-04650": 800.0,
-    "29E-45520": 200.0,
-    "29E-45560": 200.0,
-    "29E-51878": 200.0,
-    "29H-41394": 350.0,
-    "29H75028": 100.0,
-    "35H-09245": 400.0,
-    "90H-03494": 600.0,
-    "92H-03625": 200.0,
-    "Car 1": 370.0,
-    "Car 2": 200.0,
-    "Car 3": 360.0,
-    "Car 4": 370.0,
-    "Car 5": 600.0,
-}
-
-
 def available_vehicle_sources(data_source: Path | str) -> dict[str, str | Path]:
     """Return telemetry files or Excel sheets keyed by their vehicle identifier."""
     sources: dict[str, str | Path] = {}
@@ -118,22 +100,17 @@ def load_telemetry_csv(file_path: Path | str) -> pd.DataFrame:
     return frame.sort_values(["SegmentID", "FuelTime"], kind="stable")
 
 
-def estimate_capacity_liters(frame: pd.DataFrame, vehicle_id: str = "") -> float:
-    """Estimate a safe threshold scale when calibration capacity is unavailable."""
-    if vehicle_id and vehicle_id in KNOWN_CAPACITIES:
-        return KNOWN_CAPACITIES[vehicle_id]
-    fuel = pd.to_numeric(frame["FuelLevel"], errors="coerce")
-    fuel = fuel[(fuel > 0) & fuel.notna()]
-    if fuel.empty:
-        return 200.0
-    return max(200.0, float(fuel.quantile(0.995)))
+def estimate_capacity_liters(frame: pd.DataFrame, vehicle_id: str = "") -> float | None:
+    """Compatibility shim: dashboard telemetry never supplies tank capacity."""
+    del frame, vehicle_id
+    return None
 
 
 def _predict_causal_states_batch(
     frame: pd.DataFrame,
     engine: AISmoothTrackingFilter,
     vehicle_id: str,
-    capacity_est_liters: float,
+    capacity_est_liters: float | None,
 ) -> pd.Series | None:
     """Predict model states in one call while preserving causal features.
 
@@ -148,11 +125,9 @@ def _predict_causal_states_batch(
     extractor = engine.feature_extractor
     context = VehicleFilterContext(
         vehicle_id=vehicle_id,
-        capacity_est=(
-            capacity_est_liters
-            if capacity_est_liters > config.minimum_capacity
-            else config.default_capacity
-        ),
+        capacity_est=capacity_est_liters,
+        capacity_mode="KNOWN" if engine._valid_capacity(capacity_est_liters) else "UNKNOWN",
+        capacity_source="REQUEST" if engine._valid_capacity(capacity_est_liters) else "NONE",
     )
     states = np.full(len(frame), "STABLE_JITTER", dtype=object)
     feature_rows: list[list[float]] = []
@@ -168,11 +143,10 @@ def _predict_causal_states_batch(
         motion = extractor.motion_evidence(context, speed, latitude, longitude)
 
         if context.last_clean_fuel is None:
-            initial = (
-                config.initial_fuel_fallback
-                if math.isnan(raw_fuel) or raw_fuel <= 0.0
-                else raw_fuel
-            )
+            if not math.isfinite(raw_fuel) or raw_fuel <= 0.0:
+                states[position] = "UNINITIALIZED"
+                continue
+            initial = raw_fuel
             context.last_clean_fuel = initial
             context.kalman_x = initial
             context.kalman_p = 1.0
@@ -208,9 +182,6 @@ def _predict_causal_states_batch(
             context.history_time.clear()
             context.history_speed.clear()
             context.history_coordinates.clear()
-
-        if not math.isnan(raw_fuel) and raw_fuel > context.capacity_est:
-            context.capacity_est = raw_fuel * config.capacity_headroom
 
         valid_measurement = not math.isnan(raw_fuel) and raw_fuel > 0.0
         if valid_measurement:
@@ -248,7 +219,7 @@ def _predict_causal_states_batch(
     # thi day la GRADUAL_CHANGE (tieu hao xe chay), khong phai song dao dong 2 chieu.
     fuel_vals = frame["FuelLevel"].values
     n_points = len(frame)
-    min_drop = max(1.2, 0.005 * context.capacity_est)
+    min_drop = max(1.2, 0.005 * context.capacity_est) if context.capacity_est is not None else 1.2
     for idx in range(5, n_points):
         if states[idx] == "OSCILLATION_NOISE":
             win = fuel_vals[max(0, idx - 5) : idx + 1]
@@ -266,7 +237,7 @@ def _predict_causal_states_batch(
 def run_topic1_filter(
     frame: pd.DataFrame,
     vehicle_id: str,
-    capacity_est_liters: float,
+    capacity_est_liters: float | None,
     model_dir: str = "models/fuel_state_classifier",
 ) -> pd.DataFrame:
     """Run only the causal purple filter and expose the canonical diagnostics.

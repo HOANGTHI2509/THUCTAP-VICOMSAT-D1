@@ -187,9 +187,10 @@ class CausalFeatureExtractor:
         previous_valid = valid_history[-1] if valid_history else raw_fuel
         delta_fuel = raw_fuel - previous_valid
         capacity = context.capacity_est
+        capacity_value = float(capacity) if capacity is not None else 0.0
         sigma = max(
             self.config.noise_sigma_floor,
-            self.config.noise_sigma_capacity_ratio * capacity,
+            self.config.noise_sigma_capacity_ratio * capacity_value,
         )
 
         all_valid = valid_history + [raw_fuel]
@@ -201,15 +202,15 @@ class CausalFeatureExtractor:
         range7 = float(max(last7) - min(last7)) if last7 else range5
         flat_jitter = max(
             self.config.jitter_floor,
-            self.config.jitter_capacity_ratio * capacity,
+            self.config.jitter_capacity_ratio * capacity_value,
         )
         spike_threshold = max(
             self.config.spike_floor,
-            self.config.spike_capacity_ratio * capacity,
+            self.config.spike_capacity_ratio * capacity_value,
         )
         event_threshold = max(
             self.config.event_floor,
-            self.config.event_capacity_ratio * capacity,
+            self.config.event_capacity_ratio * capacity_value,
         )
 
         return {
@@ -227,7 +228,7 @@ class CausalFeatureExtractor:
             "DistanceMeters": motion.gps_displacement_meters if motion else 0.0,
             "GpsSpeedKmh": speed,
             "HasGPS": 1.0 if motion and motion.has_gps else 0.0,
-            "capacity_est": capacity,
+            "capacity_est": capacity_value,
             "noise_sigma_liters": sigma,
             "flat_jitter_threshold": flat_jitter,
             "spike_threshold": spike_threshold,

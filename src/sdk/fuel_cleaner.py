@@ -90,12 +90,13 @@ class FuelCleanerEngine:
         )
 
         signal_state = str(result.get("signal_state", "UNCERTAIN"))
-        clean_fuel = float(result.get("clean_fuel_liters", raw_fuel))
+        clean_value = result.get("clean_fuel_liters")
+        clean_fuel = float(clean_value) if clean_value is not None else None
         return {
             "vehicle_id": vehicle_id,
             "timestamp": dt.isoformat(),
             "raw_fuel": round(float(raw_fuel), 2),
-            "clean_fuel": round(clean_fuel, 2),
+            "clean_fuel": None if clean_fuel is None else round(clean_fuel, 2),
             "speed": round(float(speed or 0.0), 1),
             "signal_state": signal_state,
             "signal_state_description": SIGNAL_STATE_DESCRIPTIONS.get(
@@ -109,6 +110,9 @@ class FuelCleanerEngine:
                 result.get("gps_displacement_meters", 0.0)
             ),
             "confidence": float(result.get("confidence", 1.0)),
+            "capacity_est": result.get("capacity_est"),
+            "capacity_mode": result.get("capacity_mode", "UNKNOWN"),
+            "capacity_source": result.get("capacity_source", "NONE"),
             "processing_time_ms": round((time.perf_counter() - started) * 1000.0, 3),
             # Deprecated SDK alias; use signal_state in new integrations.
             "ai_state": signal_state,

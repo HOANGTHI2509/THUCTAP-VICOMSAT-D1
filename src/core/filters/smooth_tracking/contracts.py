@@ -10,6 +10,7 @@ from typing import Final
 
 
 SIGNAL_STATES: Final[tuple[str, ...]] = (
+    "UNINITIALIZED",
     "INIT",
     "STABLE_JITTER",
     "OSCILLATION_NOISE",
@@ -22,6 +23,7 @@ SIGNAL_STATES: Final[tuple[str, ...]] = (
 )
 
 QUALITY_FLAGS: Final[tuple[str, ...]] = (
+    "INITIAL_INVALID_DISCARDED",
     "VALID",
     "SMOOTH_KALMAN",
     "ZERO_DROPOUT_HELD",
@@ -32,6 +34,9 @@ QUALITY_FLAGS: Final[tuple[str, ...]] = (
     "UPWARD_REVERSAL_RESET",
     "PENDING_DOWNWARD_SHIFT_HELD",
     "DOWNWARD_SHIFT_TRACKED",
+    "DOWN_EXCURSION_HELD",
+    "REBOUND_RECOVERY_HELD",
+    "DOWNWARD_SHIFT_TRANSITION",
     "STABLE_LEVEL_TRACKING",
 )
 

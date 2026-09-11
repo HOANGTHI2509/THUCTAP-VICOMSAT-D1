@@ -46,9 +46,35 @@ def test_dashboard_uses_purple_topic1_output_and_canonical_diagnostics():
     assert "REFUEL" not in result["SignalState"].tolist()
 
 
-def test_dashboard_capacity_estimate_is_safe_when_calibration_is_unknown():
+def test_dashboard_capacity_estimate_stays_unknown_without_calibration():
     frame = pd.DataFrame({"FuelLevel": [0.0, 20.0, 100.0, 110.0]})
-    assert estimate_capacity_liters(frame) >= 200.0
+    assert estimate_capacity_liters(frame) is None
+    assert estimate_capacity_liters(frame, vehicle_id="92H-03625") is None
+    assert estimate_capacity_liters(frame, vehicle_id="Car 3") is None
+
+
+def test_dashboard_vehicle_is_not_clamped_by_removed_capacity_mapping():
+    start = datetime(2026, 1, 1, 8, 0)
+    frame = pd.DataFrame(
+        {
+            "FuelTime": [start, start + timedelta(minutes=2)],
+            "FuelLevel": [520.0, 519.5],
+            "Speed": [0.0, 0.0],
+            "SegmentID": [1, 1],
+        }
+    )
+
+    result = run_topic1_filter(
+        frame,
+        vehicle_id="92H-03625",
+        capacity_est_liters=estimate_capacity_liters(frame, "92H-03625"),
+        model_dir="",
+    )
+
+    assert result["CapacityMode"].eq("UNKNOWN").all()
+    assert result["CapacitySource"].eq("NONE").all()
+    assert result["CapacityEstimate"].isna().all()
+    assert result["CleanFuel"].min() > 210.0
 
 
 def test_dashboard_batches_classifier_without_changing_causal_states():

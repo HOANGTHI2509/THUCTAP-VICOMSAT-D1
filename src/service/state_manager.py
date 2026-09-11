@@ -7,7 +7,7 @@ import time
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from src.core.filters.smooth_tracking import AISmoothTrackingFilter, VehicleFilterContext
 from src.core.filters.smooth_tracking.contracts import normalize_signal_state
@@ -31,6 +31,7 @@ class StreamingStateManager:
         model_dir: Optional[str] = None,
         state_store: Optional[StateStore] = None,
         state_ttl_seconds: Optional[int] = None,
+        capacity_resolver: Optional[Callable[[str], Optional[float]]] = None,
     ):
         if model_dir is None:
             model_dir = str(Path("models/fuel_state_classifier"))
@@ -48,6 +49,15 @@ class StreamingStateManager:
         self._stats: Dict[str, Dict[str, Any]] = {}
         self.state_store = state_store or create_state_store_from_env()
         self.state_ttl_seconds = state_ttl_seconds or state_ttl_from_env()
+        self.capacity_resolver = capacity_resolver
+
+    def _resolve_capacity(self, vehicle_id: str, requested: Optional[float]) -> tuple[Optional[float], str]:
+        master = self.capacity_resolver(vehicle_id) if self.capacity_resolver is not None else None
+        if self.engine._valid_capacity(master):
+            return float(master), "MASTER_DATA"
+        if self.engine._valid_capacity(requested):
+            return float(requested), "REQUEST"
+        return None, "NONE"
 
     def _restore_context_locked(self, vehicle_id: str) -> None:
         """Restore one missing context while its vehicle lock is held."""
@@ -106,7 +116,8 @@ class StreamingStateManager:
         with vehicle_lock:
             self._restore_context_locked(vehicle_id)
             with self._registry_lock:
-                return self.engine.get_or_create_context(vehicle_id, capacity_est)
+                capacity, source = self._resolve_capacity(vehicle_id, capacity_est)
+                return self.engine.get_or_create_context(vehicle_id, capacity, source)
 
     def reset_vehicle_state(self, vehicle_id: str) -> bool:
         vehicle_lock = self._get_vehicle_lock(vehicle_id)
@@ -134,7 +145,9 @@ class StreamingStateManager:
                 vehicles.append({
                     "vehicle_id": vehicle_id,
                     "capacity_est": context.capacity_est,
-                    "noise_sigma": max(0.5, 0.002 * context.capacity_est),
+                    "noise_sigma": max(0.5, 0.002 * context.capacity_est) if context.capacity_est is not None else 0.5,
+                    "capacity_mode": context.capacity_mode,
+                    "capacity_source": context.capacity_source,
                     "total_points": stats.get("total_points", 0),
                     "last_seen": (
                         context.last_time.isoformat()
@@ -177,18 +190,20 @@ class StreamingStateManager:
             # Register the context safely before the engine reads it. From this
             # point only this vehicle lock guards mutations of that context.
             with self._registry_lock:
-                context = self.engine.get_or_create_context(vehicle_id, capacity_est)
+                capacity, capacity_source = self._resolve_capacity(vehicle_id, capacity_est)
+                context = self.engine.get_or_create_context(vehicle_id, capacity, capacity_source)
             previous_clean_fuel = (
                 float(context.last_clean_fuel)
                 if context.last_clean_fuel is not None
-                else float(fuel_level)
+                else None
             )
             result = self.engine.process_point(
                 vehicle_id=vehicle_id,
                 timestamp=fuel_time,
                 raw_fuel=fuel_level,
                 speed=speed,
-                capacity_est=capacity_est,
+                capacity_est=capacity,
+                capacity_source=capacity_source,
                 lat=lat,
                 lng=lng,
             )
@@ -205,7 +220,7 @@ class StreamingStateManager:
             "vehicle_id": vehicle_id,
             "fuel_time": fuel_time.isoformat(),
             "raw_fuel_liters": round(float(fuel_level), 2),
-            "clean_fuel_liters": float(result["clean_fuel"]),
+            "clean_fuel_liters": None if result["clean_fuel"] is None else float(result["clean_fuel"]),
             "signal_state": signal_state,
             # Compatibility key for existing Python callers. Public API uses SignalState.
             "ai_signal_state": signal_state,
@@ -216,4 +231,8 @@ class StreamingStateManager:
             "motion_state": result["motion_state"],
             "motion_confidence": result["motion_confidence"],
             "gps_displacement_meters": result["gps_displacement_meters"],
+            "capacity_est": result["capacity_est"],
+            "capacity_mode": result["capacity_mode"],
+            "capacity_source": result["capacity_source"],
+            "operational_state": result["operational_state"],
         }

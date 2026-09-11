@@ -19,6 +19,7 @@ from .config import SmoothTrackingConfig
 from .contracts import normalize_quality_flag, normalize_signal_state
 from .features import CausalFeatureExtractor
 from .kalman import smooth_kalman_update
+from .operational_guard import OperationalGuard
 from .state import MotionEvidence, VehicleFilterContext
 
 
@@ -32,6 +33,7 @@ class AISmoothTrackingFilter:
     ):
         self.config = config or SmoothTrackingConfig()
         self.feature_extractor = CausalFeatureExtractor(self.config)
+        self.operational_guard = OperationalGuard(self.config)
         self.model = None
         self.metadata = None
         self.feature_columns: List[str] = []
@@ -58,18 +60,33 @@ class AISmoothTrackingFilter:
         self,
         vehicle_id: str,
         capacity_est: Optional[float] = None,
+        capacity_source: str = "REQUEST",
     ) -> VehicleFilterContext:
+        valid_capacity = self._valid_capacity(capacity_est)
         if vehicle_id not in self.contexts:
-            cap = (
-                capacity_est
-                if capacity_est and capacity_est > self.config.minimum_capacity
-                else self.config.default_capacity
-            )
             self.contexts[vehicle_id] = VehicleFilterContext(
                 vehicle_id=vehicle_id,
-                capacity_est=cap,
+                capacity_est=float(capacity_est) if valid_capacity else None,
+                capacity_mode="KNOWN" if valid_capacity else "UNKNOWN",
+                capacity_source=capacity_source if valid_capacity else "NONE",
             )
+        elif valid_capacity:
+            context = self.contexts[vehicle_id]
+            context.capacity_est = float(capacity_est)
+            context.capacity_mode = "KNOWN"
+            context.capacity_source = capacity_source
         return self.contexts[vehicle_id]
+
+    @staticmethod
+    def _valid_capacity(value: Optional[float]) -> bool:
+        try:
+            return float(value) > 0.0 and math.isfinite(float(value))
+        except (TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _capacity_threshold(ctx: VehicleFilterContext, floor: float, ratio: float) -> float:
+        return max(floor, ratio * float(ctx.capacity_est)) if ctx.capacity_est is not None else floor
 
     def reset_context(self, vehicle_id: str) -> None:
         """Xoa trang context cua mot xe (khi chuyen phan doan moi)."""
@@ -98,19 +115,20 @@ class AISmoothTrackingFilter:
             number = float(value)
         except (TypeError, ValueError):
             return default
-        return default if math.isnan(number) else number
+        return default if not math.isfinite(number) else number
 
     def _result(
         self,
-        clean_fuel: float,
+        clean_fuel: Optional[float],
         fuel_rate: float,
         speed: float,
         ai_state: str,
         quality_flag: str,
         motion: MotionEvidence,
+        context: VehicleFilterContext,
     ) -> Dict[str, Any]:
         return {
-            "clean_fuel": round(clean_fuel, 2),
+            "clean_fuel": None if clean_fuel is None else round(clean_fuel, 2),
             "fuel_rate": round(fuel_rate, 4),
             "is_stopped": 1 if speed <= self.config.stopped_speed_kmh else 0,
             "ai_state": normalize_signal_state(ai_state),
@@ -119,6 +137,10 @@ class AISmoothTrackingFilter:
             "motion_state": motion.state,
             "motion_confidence": round(motion.confidence, 3),
             "gps_displacement_meters": round(motion.gps_displacement_meters, 2),
+            "capacity_est": context.capacity_est,
+            "capacity_mode": context.capacity_mode,
+            "capacity_source": context.capacity_source,
+            "operational_state": context.operational_state,
         }
 
     def _resolve_ai_state(
@@ -157,9 +179,8 @@ class AISmoothTrackingFilter:
                 return "STABLE_JITTER"
 
         delta_raw = raw_fuel - float(ctx.last_clean_fuel)
-        shift_threshold = max(
-            self.config.level_shift_floor,
-            self.config.level_shift_capacity_ratio * ctx.capacity_est,
+        shift_threshold = self._capacity_threshold(
+            ctx, self.config.level_shift_floor, self.config.level_shift_capacity_ratio
         )
         if delta_raw >= shift_threshold:
             return "UPWARD_SHIFT"
@@ -181,6 +202,7 @@ class AISmoothTrackingFilter:
         known_ai_state: Optional[str] = None,
         lat: Optional[float] = None,
         lng: Optional[float] = None,
+        capacity_source: str = "REQUEST",
     ) -> Dict[str, Any]:
         """
         Xu ly 1 diem do duy nhat theo thoi gian thuc (Causal).
@@ -192,20 +214,17 @@ class AISmoothTrackingFilter:
         raw_val = self._normalize_number(raw_fuel, np.nan)
         coordinate = self.feature_extractor._valid_coordinate(lat, lng)
 
-        ctx = self.get_or_create_context(vehicle_id, capacity_est)
+        ctx = self.get_or_create_context(vehicle_id, capacity_est, capacity_source)
         motion = self.feature_extractor.motion_evidence(ctx, speed, lat, lng)
 
         # 2. Xu ly diem khoi tao dau tien
         if ctx.last_clean_fuel is None:
-            if math.isnan(raw_val) or raw_val <= 0.0:
-                init_val = self.config.initial_fuel_fallback
-            else:
-                init_val = raw_val
-                if capacity_est is None:
-                    ctx.capacity_est = max(
-                        init_val * self.config.inferred_capacity_headroom,
-                        self.config.default_capacity,
-                    )
+            if not math.isfinite(raw_val) or raw_val <= 0.0:
+                return self._result(
+                    None, 0.0, speed, "UNINITIALIZED",
+                    "INITIAL_INVALID_DISCARDED", motion, ctx,
+                )
+            init_val = raw_val
 
             ctx.last_clean_fuel = init_val
             ctx.kalman_x = init_val
@@ -216,8 +235,9 @@ class AISmoothTrackingFilter:
             ctx.history_time.append(timestamp)
             ctx.history_speed.append(speed)
             ctx.history_coordinates.append(coordinate)
+            ctx.operational_state = "STABLE"
 
-            return self._result(init_val, 0.0, speed, "INIT", "VALID", motion)
+            return self._result(init_val, 0.0, speed, "INIT", "VALID", motion, ctx)
 
         # 3. Tinh khoang cach thoi gian dt
         dt_sec = (timestamp - ctx.last_time).total_seconds() if ctx.last_time else 120.0
@@ -236,10 +256,7 @@ class AISmoothTrackingFilter:
             ctx.history_time.clear()
             ctx.history_speed.clear()
             ctx.history_coordinates.clear()
-
-        # 4. Tu dong cap nhat tran dung tich neu nhien lieu do duoc cao hon
-        if not math.isnan(raw_val) and raw_val > ctx.capacity_est:
-            ctx.capacity_est = float(raw_val * self.config.capacity_headroom)
+            self.operational_guard.reset(ctx)
 
         # 5. Xac dinh trang thai AI
         ai_state = normalize_signal_state(self._resolve_ai_state(
@@ -269,14 +286,46 @@ class AISmoothTrackingFilter:
                 ai_state,
                 quality_flag,
                 motion,
+                ctx,
             )
 
         # 7. LOI THUAT TOAN THICH NGHI 2 CHE DO (BAM SAT & LAM MUOT)
         delta_from_clean = raw_val - ctx.last_clean_fuel
-        level_shift_threshold = max(
-            self.config.level_shift_floor,
-            self.config.level_shift_capacity_ratio * ctx.capacity_est,
+        level_shift_threshold = self._capacity_threshold(
+            ctx, self.config.level_shift_floor, self.config.level_shift_capacity_ratio
         )
+
+        guard_decision = self.operational_guard.evaluate(
+            context=ctx,
+            raw_fuel=raw_val,
+            timestamp=timestamp,
+            dt_minutes=dt_minutes,
+            level_shift_threshold=level_shift_threshold,
+        )
+        if guard_decision is not None:
+            clean_fuel = max(0.0, float(guard_decision.clean_fuel))
+            if ctx.capacity_est is not None:
+                clean_fuel = min(
+                    clean_fuel,
+                    ctx.capacity_est * self.config.inferred_capacity_headroom,
+                )
+            fuel_rate = (clean_fuel - ctx.last_clean_fuel) / dt_minutes
+            ctx.last_clean_fuel = clean_fuel
+            ctx.last_raw_fuel = raw_val
+            ctx.last_time = timestamp
+            ctx.history_fuel.append(raw_val)
+            ctx.history_time.append(timestamp)
+            ctx.history_speed.append(speed)
+            ctx.history_coordinates.append(coordinate)
+            return self._result(
+                clean_fuel,
+                fuel_rate,
+                speed,
+                ai_state,
+                guard_decision.quality_flag,
+                motion,
+                ctx,
+            )
 
         # Giam thoi gian bao ve sau mot dich chuyen mat bang tang.
         if ctx.recent_upward_steps > 0:
@@ -284,9 +333,8 @@ class AISmoothTrackingFilter:
 
         quality_flag = "VALID"
 
-        jitter = max(
-            self.config.jitter_floor,
-            self.config.jitter_capacity_ratio * ctx.capacity_est,
+        jitter = self._capacity_threshold(
+            ctx, self.config.jitter_floor, self.config.jitter_capacity_ratio
         )
         window = self.feature_extractor.window_evidence(ctx, raw_val, jitter)
         trend = self.feature_extractor.trend_evidence(ctx, raw_val, speed, jitter)
@@ -300,7 +348,7 @@ class AISmoothTrackingFilter:
 
         # --- A. XAC NHAN DICH CHUYEN MAT BANG TANG (causal plateau/reversal guard) ---
         is_upward_shift = False
-        plateau_tol = max(3.0, 0.006 * ctx.capacity_est)
+        plateau_tol = self._capacity_threshold(ctx, 3.0, 0.006)
 
         # 1. Theo doi ung vien dich chuyen tang dang cho xac nhan.
         if ctx.upward_anchor is not None:
@@ -312,15 +360,29 @@ class AISmoothTrackingFilter:
                 quality_flag = "UPWARD_REVERSAL_REJECTED"
             else:
                 ctx.upward_samples.append(raw_val)
-                spread = max(ctx.upward_samples) - min(ctx.upward_samples)
+                # Candidate memory is bounded. Confirmation uses only recent
+                # causal evidence; an old ramp/reversal must not poison the
+                # candidate forever.
+                ctx.upward_samples = ctx.upward_samples[-12:]
+                recent_upward = ctx.upward_samples[-3:]
+                spread = max(recent_upward) - min(recent_upward)
                 # Tăng tiến liên tục (Ramp >= 3 nhịp) HOẶC tạo mặt bằng ổn định trên cao (Plateau >= 3 nhịp)
-                is_advancing = (len(ctx.upward_samples) >= 3 and
-                                all(ctx.upward_samples[k] >= ctx.upward_samples[k-1] - 1.5 for k in range(1, len(ctx.upward_samples))))
-                is_stable_plateau = (len(ctx.upward_samples) >= 3 and spread <= plateau_tol * 1.5)
+                is_advancing = (len(recent_upward) >= 3 and
+                                all(recent_upward[k] >= recent_upward[k-1] - 1.5 for k in range(1, len(recent_upward))))
+                is_stable_plateau = (len(recent_upward) >= 3 and spread <= plateau_tol * 1.5)
+                # A very large rise sustained for two measurements is enough
+                # for the strong causal path. Recovery from a deep U is handled
+                # by OperationalGuard before this branch.
+                recent_two = ctx.upward_samples[-2:]
+                strong_persistent_up = (
+                    len(recent_two) >= 2
+                    and min(recent_two) >= ctx.upward_anchor + 2.0 * level_shift_threshold
+                    and recent_two[-1] >= recent_two[-2] - plateau_tol
+                )
                 # Hoặc có AI xác nhận rõ ràng UPWARD_SHIFT / RISING từ nhịp 2
                 ai_supported = (len(ctx.upward_samples) >= 2 and ai_state == "UPWARD_SHIFT")
 
-                if is_advancing or is_stable_plateau or ai_supported:
+                if strong_persistent_up or is_advancing or is_stable_plateau or ai_supported:
                     is_upward_shift = True
                     ctx.upward_anchor = None
                     ctx.upward_samples.clear()
@@ -353,6 +415,7 @@ class AISmoothTrackingFilter:
             ctx.pending_downward_count = 0
             ctx.drop_count = 0
             quality_flag = "UPWARD_SHIFT_TRACKED"
+            ctx.operational_state = "UPWARD_CONFIRMED"
 
         # Neu dang bao ve sau dich chuyen tang ma raw quay lai gan muc cu: hoan tac.
         elif ctx.recent_upward_steps > 0 and delta_from_clean <= -level_shift_threshold * 0.5:
@@ -372,6 +435,7 @@ class AISmoothTrackingFilter:
                 ctx.pending_downward_count = 0
                 ctx.drop_count = 0
                 quality_flag = "DOWNWARD_SHIFT_TRACKED"
+                ctx.operational_state = "DOWNWARD_CONFIRMED"
             else:
                 clean_fuel = ctx.last_clean_fuel
                 quality_flag = "PENDING_DOWNWARD_SHIFT_HELD"
@@ -390,6 +454,7 @@ class AISmoothTrackingFilter:
             ctx.pending_downward_count = 0
             ctx.drop_count = 0
             quality_flag = "STABLE_LEVEL_TRACKING"
+            ctx.operational_state = "STABLE"
 
         # --- C. CHE DO LAM MUOT DOI XUNG & BAM DOC TIEU HAO (TREND-ADAPTIVE) ---
         elif quality_flag != "PENDING_UPWARD_SHIFT_HELD":
@@ -407,12 +472,19 @@ class AISmoothTrackingFilter:
                 motion=motion,
             )
             quality_flag = "SMOOTH_KALMAN"
+            ctx.operational_state = (
+                "GRADUAL_TRACKING" if ai_state == "GRADUAL_CHANGE" else "STABLE"
+            )
+
+        if quality_flag == "PENDING_UPWARD_SHIFT_HELD":
+            ctx.operational_state = "PENDING_UPWARD"
+        elif quality_flag == "PENDING_DOWNWARD_SHIFT_HELD":
+            ctx.operational_state = "PENDING_DOWNWARD"
 
         # 8. Gioi han vat ly
-        clean_fuel = max(
-            0.0,
-            min(float(clean_fuel), ctx.capacity_est * self.config.inferred_capacity_headroom),
-        )
+        clean_fuel = max(0.0, float(clean_fuel))
+        if ctx.capacity_est is not None:
+            clean_fuel = min(clean_fuel, ctx.capacity_est * self.config.inferred_capacity_headroom)
 
         fuel_rate = (clean_fuel - ctx.last_clean_fuel) / dt_minutes
 
@@ -425,4 +497,4 @@ class AISmoothTrackingFilter:
         ctx.history_speed.append(speed)
         ctx.history_coordinates.append(coordinate)
 
-        return self._result(clean_fuel, fuel_rate, speed, ai_state, quality_flag, motion)
+        return self._result(clean_fuel, fuel_rate, speed, ai_state, quality_flag, motion, ctx)

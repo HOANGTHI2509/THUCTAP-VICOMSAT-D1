@@ -61,6 +61,10 @@ def filter_smooth_tracking_dataframe(
     motion_states = []
     motion_confidences = []
     gps_displacements = []
+    capacity_estimates = []
+    capacity_modes = []
+    capacity_sources = []
+    operational_states = []
 
     time_col = "FuelTime" if "FuelTime" in df_out.columns else df_out.columns[0]
     fuel_col = "FuelLevel" if "FuelLevel" in df_out.columns else "Nhiên liệu"
@@ -95,6 +99,10 @@ def filter_smooth_tracking_dataframe(
         motion_states.append(res["motion_state"])
         motion_confidences.append(res["motion_confidence"])
         gps_displacements.append(res["gps_displacement_meters"])
+        capacity_estimates.append(res["capacity_est"])
+        capacity_modes.append(res["capacity_mode"])
+        capacity_sources.append(res["capacity_source"])
+        operational_states.append(res["operational_state"])
 
     df_out["CleanFuel_SmoothTracking"] = clean_fuels
     df_out["FuelRate_SmoothTracking"] = fuel_rates
@@ -104,5 +112,9 @@ def filter_smooth_tracking_dataframe(
     df_out["MotionState_SmoothTracking"] = motion_states
     df_out["MotionConfidence_SmoothTracking"] = motion_confidences
     df_out["GpsDisplacementMeters_SmoothTracking"] = gps_displacements
+    df_out["CapacityEstimate"] = capacity_estimates
+    df_out["CapacityMode"] = capacity_modes
+    df_out["CapacitySource"] = capacity_sources
+    df_out["OperationalState"] = operational_states
 
     return df_out

@@ -91,10 +91,10 @@ async def security_api_key_middleware(request: Request, call_next):
 
 
 # 2. Khởi tạo In-Memory State Manager & SDK & DB 3NF
-state_manager = StreamingStateManager()
+db_manager = get_db_manager(DATABASE_URL)
+state_manager = StreamingStateManager(capacity_resolver=db_manager.get_configured_vehicle_capacity)
 queue_manager = VehicleQueueManager(state_manager=state_manager)
 sdk_engine = FuelCleanerEngine(state_manager=state_manager)
-db_manager = get_db_manager(DATABASE_URL)
 
 
 # 3. Pydantic Schemas Doanh Nghiệp (Hỗ trợ Bí danh Tiếng Anh / Tiếng Việt)
@@ -144,7 +144,7 @@ class CleanFuelOutput(BaseModel):
     vehicle_id: str = Field(..., alias="VehicleID")
     fuel_time: str = Field(..., alias="FuelTime")
     raw_fuel_liters: float = Field(..., alias="RawFuel")
-    clean_fuel_liters: float = Field(..., alias="CleanFuel")
+    clean_fuel_liters: Optional[float] = Field(..., alias="CleanFuel")
     signal_state: str = Field(
         ...,
         validation_alias=AliasChoices(
@@ -211,7 +211,7 @@ def enterprise_clean_point(point: EnterprisePointInput) -> CleanFuelOutput:
         capacity_est=point.capacity_est,
     )
 
-    if db_manager.enabled:
+    if db_manager.enabled and res["clean_fuel"] is not None:
         db_manager.save_measurement(
             vehicle_id=point.vehicle_id,
             timestamp=point.timestamp,

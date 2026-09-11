@@ -1,15 +1,16 @@
 """Cau hinh cho bo loc AI Smooth-Tracking."""
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(frozen=True)
 class SmoothTrackingConfig:
     """Toan bo tham so co the tinh chinh ma khong sua loi thuat toan."""
 
-    default_capacity: float = 200.0
+    default_capacity: Optional[float] = None
     minimum_capacity: float = 30.0
-    initial_fuel_fallback: float = 50.0
+    initial_fuel_fallback: Optional[float] = None
     capacity_headroom: float = 1.02
     inferred_capacity_headroom: float = 1.05
     reset_gap_minutes: float = 120.0
@@ -55,3 +56,16 @@ class SmoothTrackingConfig:
     stable_level_gain: float = 0.65
     strong_noise_directionality_max: float = 0.50
     downward_directionality_min: float = 0.65
+
+    # Operational protection for deep low-positive dropout/U excursions.
+    extreme_excursion_baseline_ratio: float = 0.30
+    dropout_like_depth_ratio: float = 0.70
+    extreme_excursion_noise_multiplier: float = 12.0
+    extreme_excursion_accept_minutes: float = 60.0
+    excursion_rebound_cancel_ratio: float = 0.60
+    excursion_accept_max_rebound_ratio: float = 0.25
+    excursion_plateau_points: int = 4
+    excursion_plateau_floor: float = 2.0
+    excursion_plateau_noise_multiplier: float = 3.0
+    excursion_transition_minutes: float = 12.0
+    recovery_baseline_ratio: float = 0.05

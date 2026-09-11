@@ -218,9 +218,8 @@ class VehicleQueueManager:
             data.get("time", data.get("FuelTime", datetime.now().isoformat()))
         )
         address = str(data.get("address", data.get("Address", "")))
-        capacity_est = float(
-            data.get("capacity_est", data.get("capacity", 200.0))
-        )
+        capacity_raw = data.get("capacity_est", data.get("capacity"))
+        capacity_est = float(capacity_raw) if capacity_raw is not None else None
 
         if lat > 50 and lng < 50:
             lat, lng = lng, lat
@@ -239,7 +238,8 @@ class VehicleQueueManager:
             lng=lng,
             capacity_est=capacity_est,
         )
-        clean_fuel = float(result["clean_fuel_liters"])
+        clean_value = result["clean_fuel_liters"]
+        clean_fuel = float(clean_value) if clean_value is not None else None
         signal_state = result.get("signal_state") or result.get(
             "ai_signal_state", "UNCERTAIN"
         )
@@ -278,8 +278,8 @@ class VehicleQueueManager:
             if stats is not None:
                 stats["total_processed"] += 1
                 stats["current_fuel_raw"] = round(raw_fuel, 2)
-                stats["current_fuel_clean"] = round(clean_fuel, 2)
-                stats["current_fuel_smooth"] = round(clean_fuel, 2)
+                stats["current_fuel_clean"] = None if clean_fuel is None else round(clean_fuel, 2)
+                stats["current_fuel_smooth"] = None if clean_fuel is None else round(clean_fuel, 2)
                 stats["current_speed"] = round(speed, 1)
                 stats["current_state"] = signal_state
                 stats["current_motion_state"] = result.get("motion_state", "UNCERTAIN")
@@ -289,7 +289,7 @@ class VehicleQueueManager:
                 stats["last_processed_at"] = datetime.now().isoformat()
 
         return {
-            "clean_fuel": round(clean_fuel, 2),
+            "clean_fuel": None if clean_fuel is None else round(clean_fuel, 2),
             "raw_fuel": round(raw_fuel, 2),
             "signal_state": signal_state,
             "ai_state": signal_state,

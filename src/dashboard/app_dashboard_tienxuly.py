@@ -17,7 +17,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.dashboard.dashboard_data import (  # noqa: E402
     available_vehicle_sources,
-    estimate_capacity_liters,
     load_telemetry_csv,
     run_topic1_filter,
 )
@@ -30,7 +29,7 @@ DATASET_CHOICES = {
 }
 DATA_DIRECTORY = Path(os.getenv("FUEL_DATA_DIRECTORY", PROJECT_ROOT / "fulltt"))
 MODEL_DIRECTORY = str(PROJECT_ROOT / "models" / "fuel_state_classifier")
-FILTER_PIPELINE_VERSION = "smooth-tracking-origin-dev-1cbc895-v4"
+FILTER_PIPELINE_VERSION = "smooth-tracking-origin-dev-1cbc895-v6-operational-excursion"
 
 st.set_page_config(
     page_title="VCOMSAT Fuel Denoising",
@@ -55,7 +54,7 @@ def _load_source(file_path: str, modified_at_ns: int):
 def _filter_source(
     frame,
     vehicle_id: str,
-    capacity_est_liters: float,
+    capacity_est_liters: float | None,
     pipeline_version: str,
 ):
     del pipeline_version
@@ -114,11 +113,13 @@ scope = frame.copy()
 if selected_segment != "Tất cả phân đoạn":
     scope = scope[scope["SegmentID"].astype(str) == selected_segment].copy()
 
-capacity_est_liters = estimate_capacity_liters(scope, vehicle_id=vehicle_id)
+# Dashboard telemetry is not authoritative master data. Keep capacity UNKNOWN;
+# trusted capacity may only enter through a separate request/master-data path.
+capacity_est_liters = None
 with st.sidebar:
     st.markdown("---")
     st.caption(
-        f"Capacity: {capacity_est_liters:.1f} L. "
+        "Capacity: UNKNOWN (dashboard không cung cấp capacity). "
         "Q/R dùng cấu hình versioned của Smooth-Tracking."
     )
     st.caption("Muốn đổi Q/R phải cập nhật config và chạy golden/KPI, không chỉnh trên dashboard.")

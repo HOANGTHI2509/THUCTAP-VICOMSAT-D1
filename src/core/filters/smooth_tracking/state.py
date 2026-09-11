@@ -11,7 +11,9 @@ class VehicleFilterContext:
     """Bo nho rieng cua mot xe, khong chia se voi xe khac."""
 
     vehicle_id: str
-    capacity_est: float = 200.0
+    capacity_est: Optional[float] = None
+    capacity_mode: str = "UNKNOWN"
+    capacity_source: str = "NONE"
     kalman_x: Optional[float] = None
     kalman_p: float = 1.0
     last_clean_fuel: Optional[float] = None
@@ -23,6 +25,17 @@ class VehicleFilterContext:
     rise_count: int = 0
     upward_anchor: Optional[float] = None
     upward_samples: List[float] = field(default_factory=list)
+    operational_state: str = "UNINITIALIZED"
+    excursion_active: bool = False
+    excursion_direction: Optional[str] = None
+    excursion_baseline: Optional[float] = None
+    excursion_min: Optional[float] = None
+    excursion_max: Optional[float] = None
+    excursion_start_time: Optional[datetime] = None
+    excursion_samples: List[float] = field(default_factory=list)
+    excursion_confirmed: bool = False
+    recovery_active: bool = False
+    rebound_ratio: float = 0.0
     history_fuel: deque = field(default_factory=lambda: deque(maxlen=12))
     history_time: deque = field(default_factory=lambda: deque(maxlen=12))
     history_speed: deque = field(default_factory=lambda: deque(maxlen=12))

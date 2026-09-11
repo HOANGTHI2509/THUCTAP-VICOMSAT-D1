@@ -206,6 +206,8 @@ def serialize_vehicle_context(
         "vehicle_id": context.vehicle_id,
         "context": {
             "capacity_est": context.capacity_est,
+            "capacity_mode": context.capacity_mode,
+            "capacity_source": context.capacity_source,
             "kalman_x": context.kalman_x,
             "kalman_p": context.kalman_p,
             "last_clean_fuel": context.last_clean_fuel,
@@ -238,7 +240,9 @@ def deserialize_vehicle_context(document: Dict[str, Any]) -> tuple[VehicleFilter
     values = document["context"]
     context = VehicleFilterContext(
         vehicle_id=str(document["vehicle_id"]),
-        capacity_est=float(values["capacity_est"]),
+        capacity_est=(float(values["capacity_est"]) if values.get("capacity_est") is not None else None),
+        capacity_mode=str(values.get("capacity_mode", "KNOWN" if values.get("capacity_est") is not None else "UNKNOWN")),
+        capacity_source=str(values.get("capacity_source", "REQUEST" if values.get("capacity_est") is not None else "NONE")),
         kalman_x=values.get("kalman_x"),
         kalman_p=float(values.get("kalman_p", 1.0)),
         last_clean_fuel=values.get("last_clean_fuel"),

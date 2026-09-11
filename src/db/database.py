@@ -115,7 +115,7 @@ class DatabaseManager:
         finally:
             session.close()
 
-    def ensure_vehicle(self, vehicle_id: str, capacity_liters: Optional[float] = 850.0, vehicle_name: Optional[str] = None):
+    def ensure_vehicle(self, vehicle_id: str, capacity_liters: Optional[float] = None, vehicle_name: Optional[str] = None):
         """Đảm bảo xe đã tồn tại trong bảng vehicles (Chuẩn 3NF)."""
         if not self.enabled:
             return
@@ -126,16 +126,30 @@ class DatabaseManager:
                 vehicle = Vehicle(
                     vehicle_id=vehicle_id,
                     vehicle_name=vehicle_name or f"Xe {vehicle_id}",
-                    capacity_liters=capacity_liters or 850.0,
+                    capacity_liters=capacity_liters,
                 )
                 session.add(vehicle)
                 session.commit()
-            elif capacity_liters and vehicle.capacity_liters != capacity_liters:
+            elif capacity_liters is not None and capacity_liters > 0 and vehicle.capacity_liters != capacity_liters:
                 vehicle.capacity_liters = capacity_liters
                 session.commit()
         except Exception as e:
             session.rollback()
             logger.warning(f"Lỗi ensure_vehicle '{vehicle_id}': {e}")
+        finally:
+            session.close()
+
+    def get_configured_vehicle_capacity(self, vehicle_id: str) -> Optional[float]:
+        """Return trusted master-data capacity; legacy 850L placeholders are UNKNOWN."""
+        if not self.enabled:
+            return None
+        session = self.session_factory()
+        try:
+            vehicle = session.get(Vehicle, vehicle_id)
+            value = vehicle.capacity_liters if vehicle is not None else None
+            if value is None or value <= 0 or float(value) == 850.0:
+                return None
+            return float(value)
         finally:
             session.close()
 
@@ -149,7 +163,7 @@ class DatabaseManager:
         lat: Optional[float] = None,
         lng: Optional[float] = None,
         state_code: str = "STABLE_JITTER",
-        capacity_est: Optional[float] = 850.0,
+        capacity_est: Optional[float] = None,
     ) -> Optional[int]:
         """
         Lưu một điểm đo đạc sau khi lọc sạch vào bảng fuel_logs chuẩn 3NF.
@@ -205,7 +219,7 @@ class DatabaseManager:
         lat: Optional[float] = None,
         lng: Optional[float] = None,
         address: Optional[str] = None,
-        capacity_est: Optional[float] = 850.0,
+        capacity_est: Optional[float] = None,
     ) -> Optional[int]:
         """
         Lưu sự kiện đặc biệt (REFUEL hoặc DRAIN) vào bảng fuel_events chuẩn 3NF.

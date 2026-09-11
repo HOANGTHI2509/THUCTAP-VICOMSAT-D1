@@ -18,7 +18,7 @@ class Vehicle(Base):
 
     vehicle_id = Column(String(50), primary_key=True, index=True, doc="Biển số hoặc mã định danh xe")
     vehicle_name = Column(String(100), nullable=True, doc="Tên gợi nhớ hoặc loại phương tiện")
-    capacity_liters = Column(Float, nullable=True, default=850.0, doc="Dung tích bình chứa chuẩn (Lít)")
+    capacity_liters = Column(Float, nullable=True, default=None, doc="Dung tích bình chứa đã cấu hình (Lít)")
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     # Relationships

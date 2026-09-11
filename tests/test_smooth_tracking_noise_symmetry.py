@@ -149,3 +149,38 @@ def test_vehicle_contexts_are_isolated():
     assert second_vehicle["clean_fuel"] == 300.0
     assert engine.contexts["CAR_A"].last_clean_fuel == 100.0
     assert engine.contexts["CAR_B"].last_clean_fuel == 300.0
+
+
+def test_long_extreme_low_positive_u_is_held_and_rebound_is_not_up_shift():
+    # More than 60 elapsed minutes proves that a fixed time/sample timeout
+    # must not accept a near-total sensor-floor excursion as a new baseline.
+    values = [100.0] + [20.0] * 35 + [70.0, 100.0, 99.8]
+    results = _run(
+        values,
+        ["STABLE_JITTER"] * len(values),
+        [0.0] * len(values),
+        capacity=200.0,
+    )
+    clean = [item["clean_fuel"] for item in results]
+    flags = [item["quality_flag"] for item in results]
+
+    assert min(clean) > 95.0
+    assert "DOWN_EXCURSION_HELD" in flags
+    assert "REBOUND_RECOVERY_HELD" in flags
+    assert "DOWNWARD_SHIFT_TRACKED" not in flags
+    assert "UPWARD_SHIFT_TRACKED" not in flags
+
+
+def test_strong_persistent_up_uses_fast_path_and_does_not_stick_pending():
+    values = [100.0, 170.0, 220.0, 220.5]
+    results = _run(
+        values,
+        ["STABLE_JITTER"] * len(values),
+        [0.0] * len(values),
+        capacity=800.0,
+    )
+
+    assert results[1]["quality_flag"] == "PENDING_UPWARD_SHIFT_HELD"
+    assert results[2]["quality_flag"] == "UPWARD_SHIFT_TRACKED"
+    assert results[2]["operational_state"] == "UPWARD_CONFIRMED"
+    assert results[2]["clean_fuel"] == 220.0
