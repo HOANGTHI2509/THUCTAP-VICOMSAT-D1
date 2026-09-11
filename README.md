@@ -1,6 +1,3 @@
-
-![Realtime Dashboard 1](docs/images/realtime_dashboard_1.png)
-![Realtime Dashboard 2](docs/images/realtime_dashboard_2.png)
 # VCOMSAT — Real-time Fuel Data Denoising & Filtering (Đề tài 1)
 
 > **Hệ thống xử lý nhiễu và lọc tín hiệu mức nhiên liệu viễn thông theo thời gian thực (Causal Filtering)**  
@@ -649,6 +646,10 @@ Dưới đây là kết quả kiểm thử thực tế từ bộ test tự độ
 ---
 
 ## 16. Dashboard phân tích và kiểm tra trực quan
+
+![Realtime Dashboard 1](docs/images/realtime_dashboard_1.png)
+![Realtime Dashboard 2](docs/images/realtime_dashboard_2.png)
+
 
 Dự án trang bị một ứng dụng Dashboard trực quan hóa chuyên sâu bằng Streamlit ([src/dashboard/app_dashboard_tienxuly.py](file:///d:/THUCTAP_VICOMSAT/src/dashboard/app_dashboard_tienxuly.py)) cùng module nạp dữ liệu đa nguồn ([src/dashboard/dashboard_data.py](file:///d:/THUCTAP_VICOMSAT/src/dashboard/dashboard_data.py)).
 
