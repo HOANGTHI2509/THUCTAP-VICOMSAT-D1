@@ -1,7 +1,7 @@
 # VCOMSAT — Real-time Fuel Data Denoising & Filtering (Đề tài 1)
 
 > **Hệ thống xử lý nhiễu và lọc tín hiệu mức nhiên liệu viễn thông theo thời gian thực (Causal Filtering)**  
-> Phiên bản bàn giao: `1.2.0-enterprise` | Trạng thái kiểm thử: `83/83 unit/regression tests passed`, `18/19 golden behavior checks`
+
 
 ---
 
@@ -83,6 +83,8 @@ flowchart TD
         Out_CF --> Dashboard["Live Dashboard (Streamlit/React)"]
     end
 ```
+
+![System Demo](docs/images/system_demo.png)
 
 ### 2.2. Chi tiết chức năng 8 tầng xử lý
 1. **Tầng tiếp nhận (Ingestion Gateway)**: Nhận bản tin JSON qua REST API (`/api/v1/fuel/clean-point` hoặc `/clean-batch`), kiểm tra API Key và đẩy vào hàng đợi đơn luồng theo từng xe (`VehicleQueueManager`).
