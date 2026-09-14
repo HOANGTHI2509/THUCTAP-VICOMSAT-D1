@@ -43,6 +43,15 @@ Hệ thống hoạt động theo nguyên lý **Causal Stream Processing**: mỗi
 
 ### 2.1. Sơ đồ luồng dữ liệu (Architecture Pipeline)
 
+<p align="center">
+  <img src="docs/images/system_demo.png" alt="Kiến trúc hệ thống xử lý nhiên liệu thời gian thực" width="100%">
+</p>
+
+*Hình: Sơ đồ kiến trúc luồng dữ liệu thời gian thực (Causal Stream Processing) từ thiết bị đầu vào đến các tầng xử lý và lưu trữ.*
+
+<details>
+<summary><b>Chi tiết sơ đồ cấu trúc dạng mã Mermaid</b></summary>
+
 ```mermaid
 flowchart TD
     %% Khối Nguồn Dữ Liệu
@@ -57,7 +66,7 @@ flowchart TD
     %% Khối Quản lý Trạng thái & Tiền xử lý
     subgraph State_Layer ["2. State Management & Preprocessing"]
         Q --> SM["StreamingStateManager"]
-        SM <-->|Đọc/Ghi Context (Kalman, Lịch sử)| DB[("In-Memory Storage (Sẵn sàng mở rộng lên Redis)")]
+        SM ---|"Đọc/Ghi Context (Kalman, Lịch sử)"| DB[("In-Memory Storage (Sẵn sàng mở rộng lên Redis)")]
         SM --> C["Kiểm tra & Chuẩn hóa (Sanitization)"]
         C --> Cap["Dynamic Capacity Inference"]
     end
@@ -84,7 +93,7 @@ flowchart TD
     end
 ```
 
-![System Demo](docs/images/system_demo.png)
+</details>
 
 ### 2.2. Chi tiết chức năng 8 tầng xử lý
 1. **Tầng tiếp nhận (Ingestion Gateway)**: Nhận bản tin JSON qua REST API (`/api/v1/fuel/clean-point` hoặc `/clean-batch`), kiểm tra API Key và đẩy vào hàng đợi đơn luồng theo từng xe (`VehicleQueueManager`).
